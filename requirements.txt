@@ -1,0 +1,9 @@
+# --- Nucleo: NESSUNA dipendenza obbligatoria -------------------------------
+# Ingestione MusicXML/MIDI, analisi, arrangiamento, validazione ed export
+# funzionano con la sola libreria standard di Python 3.9+.
+
+# --- Interfaccia -----------------------------------------------------------
+streamlit>=1.32
+
+# --- Strato IA (facoltativo) -----------------------------------------------
+# anthropic>=0.40.0
