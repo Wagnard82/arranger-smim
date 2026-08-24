@@ -85,6 +85,21 @@ def qualita_linea(linea: List[Nota]) -> float:
             + 0.3 * min(1.0, copertura / max(1.0, linea[-1].fine - linea[0].inizio)))
 
 
+def ipotesi_melodiche(sp: Spartito) -> Tuple[List[Tuple[float, List[Nota]]],
+                                             List[int]]:
+    """Le tre ipotesi di linea melodica e la scelta euristica misura per misura."""
+    ipotesi = [(b, _linea_viterbi(sp, b)) for b in (0.45, 0.0, -0.75)]
+    ipotesi = [(b, l) for b, l in ipotesi if l]
+    if not ipotesi or not sp.misure:
+        return ipotesi, []
+    return ipotesi, _scelta_per_misura(sp, ipotesi)
+
+
+def melodia_da_scelte(sp: Spartito, ipotesi, scelta: List[int]) -> List[Nota]:
+    """Ricompone la melodia da una scelta di ipotesi per misura."""
+    return _cuci(sp, ipotesi, scelta)
+
+
 def rileva_melodia(sp: Spartito) -> List[Nota]:
     """
     Rilevatore BIDIREZIONALE e LOCALE.
@@ -488,24 +503,114 @@ def rileva_armonia(sp: Spartito, per_movimento: bool = True) -> List[Accordo]:
 
 def rileva_basso(sp: Spartito, armonia: List[Accordo]) -> List[Nota]:
     """
-    Nota piu' grave della mano sinistra; se non appartiene all'accordo viene
-    sostituita con la fondamentale (regola richiesta nel documento).
+    Estrae la linea di basso REALE, con il suo ritmo.
+
+    Il basso di un accompagnamento pianistico ha quasi sempre una figurazione
+    riconoscibile (crome ribattute, ottave alternate, bassi albertini): ridurlo
+    a una nota per accordo, come farebbe una griglia armonica, butta via
+    proprio l'informazione ritmica piu' utile all'arrangiamento.
+
+    Si segue quindi la voce piu' grave nota per nota, accettando un nuovo
+    evento solo quando resta nel registro di basso: le note dell'accordo che
+    attaccano sopra un basso ancora in corso non lo interrompono. Se non c'e'
+    materiale sufficiente si torna alla griglia armonica.
     """
-    basso: List[Nota] = []
-    for acc in armonia:
-        sonanti = [n for n in sp.note_in(acc.inizio, acc.fine)]
-        if not sonanti:
+    gravi = [n for n in sp.note if n.rigo == 2] or sp.note
+    linea = _linea_di_basso(gravi, pavimenti=_pavimenti(sp, gravi))
+
+    misure = max(1, len(sp.misure))
+    if len(linea) < misure * 0.6:
+        linea = [Nota(midi=0, inizio=a.inizio, durata=a.durata, rigo=2)
+                 for a in armonia]
+        for n, a in zip(linea, armonia):
+            sonanti = [x for x in sp.note_in(a.inizio, a.fine) if x.rigo == 2] \
+                or sp.note_in(a.inizio, a.fine)
+            grave = min(sonanti, key=lambda x: x.midi) if sonanti else None
+            n.midi = grave.midi if grave else a.fondamentale + 36
+
+    # ogni nota di basso arriva fino all'attacco successivo (senza scavalcare
+    # la stanghetta): gli ATTACCHI restano quelli dell'originale - cioe' il
+    # ritmo - ma la linea non risulta punteggiata di pause
+    for i, n in enumerate(linea):
+        limite = linea[i + 1].inizio if i + 1 < len(linea) else sp.durata_totale
+        m = sp.misura_a(n.inizio)
+        if m is not None:
+            limite = min(limite, m.fine)
+        if limite > n.fine + 1e-6:
+            n.durata = limite - n.inizio
+
+    # le note estranee all'armonia diventano la fondamentale (regola richiesta)
+    fuori: List[Nota] = []
+    for n in linea:
+        acc = next((a for a in armonia
+                    if a.inizio - 1e-6 <= n.inizio < a.fine - 1e-6), None)
+        midi = n.midi
+        if acc is not None and midi % 12 not in acc.note_accordo():
+            candidate = [o * 12 + acc.fondamentale for o in range(1, 7)]
+            midi = min(candidate, key=lambda c: abs(c - n.midi))
+        fuori.append(Nota(midi=midi, inizio=n.inizio, durata=n.durata, rigo=2))
+    return fuori
+
+
+def _pavimenti(sp: Spartito, note: List[Nota]) -> Dict[float, int]:
+    """Registro piu' grave toccato in ogni misura: e' il 'pavimento' del basso."""
+    fuori: Dict[float, int] = {}
+    for m in sp.misure:
+        dentro = [n.midi for n in note
+                  if m.inizio - 1e-6 <= n.inizio < m.fine - 1e-6]
+        if dentro:
+            fuori[m.inizio] = min(dentro)
+    return fuori
+
+
+def _linea_di_basso(note: List[Nota], pavimenti: Optional[Dict[float, int]] = None,
+                    tolleranza: int = 3) -> List[Nota]:
+    """
+    Voce piu' grave seguita nel tempo, con due filtri:
+
+      * un attacco non fa basso se sta solo aggiungendo un accordo sopra un
+        basso ancora in corso;
+      * un attacco non fa basso se sta troppo sopra il registro grave della
+        misura: e' cosi' che un basso albertino (Do-Sol-Mi-Sol) si riduce al
+        suo vero basso invece di essere preso alla lettera.
+    """
+    if not note:
+        return []
+    pavimenti = pavimenti or {}
+    soglie = sorted(pavimenti.items())
+    attacchi = sorted({round(n.inizio, 6) for n in note})
+    linea: List[Nota] = []
+    corrente: Optional[Nota] = None
+
+    def pavimento(t: float) -> Optional[int]:
+        scelto = None
+        for inizio, valore in soglie:
+            if inizio <= t + 1e-6:
+                scelto = valore
+            else:
+                break
+        return scelto
+
+    for t in attacchi:
+        gruppo = [n for n in note if abs(n.inizio - t) < 1e-6]
+        grave = min(gruppo, key=lambda n: n.midi)
+        if corrente is not None and corrente.fine > t + 1e-6 \
+                and grave.midi > corrente.midi + tolleranza:
             continue
-        sinistra = [n for n in sonanti if n.rigo == 2] or sonanti
-        grave = min(sinistra, key=lambda n: n.midi)
-        pcs = acc.note_accordo()
-        midi = grave.midi
-        if midi % 12 not in pcs:
-            # porta alla fondamentale piu' vicina nella stessa ottava
-            candidate = [ott * 12 + acc.fondamentale for ott in range(1, 7)]
-            midi = min(candidate, key=lambda c: abs(c - grave.midi))
-        basso.append(Nota(midi=midi, inizio=acc.inizio, durata=acc.durata, rigo=2))
-    return basso
+        base = pavimento(t)
+        if base is not None and grave.midi > base + tolleranza:
+            # eccezione: il raddoppio all'ottava e' parte della figurazione di
+            # basso (bassi in ottave, oom-pah), non un accordo sopra il basso
+            ottava_del_basso = (corrente is not None
+                                and grave.midi % 12 == corrente.midi % 12
+                                and grave.midi <= base + 12)
+            if not ottava_del_basso:
+                continue
+        if corrente is not None and corrente.fine > t + 1e-6:
+            corrente.durata = t - corrente.inizio
+        corrente = Nota(midi=grave.midi, inizio=t, durata=grave.durata, rigo=2)
+        linea.append(corrente)
+    return [n for n in linea if n.durata > 1e-6]
 
 
 # --------------------------------------------------------------------------
@@ -577,11 +682,187 @@ def rileva_frasi(sp: Spartito, melodia: List[Nota]) -> List[Tuple[float, float]]
 # --------------------------------------------------------------------------
 
 
+def rileva_figurazione(sp: Spartito, melodia: List[Nota]) -> List[Nota]:
+    """
+    Tutto cio' che NON e' melodia: l'accompagnamento come sta scritto
+    nell'originale, con i suoi attacchi e le sue durate.
+
+    E' il materiale da cui ricavare arpeggi e figure ritmiche: una volta
+    riconosciuta la melodia, il resto e' accompagnamento e va sfruttato, non
+    ridotto a una griglia di accordi.
+    """
+    chiavi_melodia = {(round(n.inizio, 6), n.midi) for n in melodia}
+    return [n for n in sp.note if (round(n.inizio, 6), n.midi) not in chiavi_melodia]
+
+
+def densita_figurazione(figurazione: List[Nota], misure: List[Misura]) -> float:
+    """Attacchi distinti per misura: quanto e' 'mossa' la figurazione."""
+    if not figurazione or not misure:
+        return 0.0
+    attacchi = {round(n.inizio, 6) for n in figurazione}
+    return len(attacchi) / len(misure)
+
+
+def rileva_voci_interne(sp: Spartito, gia_usate: List[Nota],
+                        massimo: int = 3, soglia: float = 0.80) -> List[List[Nota]]:
+    """
+    Cerca le voci melodiche SECONDARIE: seconde e terze voci, controcanti,
+    contrappunti. Sono quelle che, tolte melodia e basso, formano ancora una
+    linea cantabile - non semplici note di riempimento.
+
+    Due accorgimenti fanno la differenza fra una voce e una collana di note:
+      * si cerca dentro UN SOLO RIGO per volta, altrimenti la linea salta da
+        una mano all'altra;
+      * si scarta chi copre piu' di due ottave e mezzo o e' dominato da due
+        sole altezze: quello e' riempimento armonico, non contrappunto.
+    """
+    usate = {(round(n.inizio, 6), n.midi) for n in gia_usate}
+    resto = [n for n in sp.note if (round(n.inizio, 6), n.midi) not in usate]
+    voci: List[List[Nota]] = []
+
+    for _ in range(massimo):
+        migliore: Optional[List[List[Nota]]] = None
+        for rigo in (1, 2):
+            materiale = [n for n in resto if n.rigo == rigo]
+            if len(materiale) < 8:
+                continue
+            parziale = Spartito(titolo=sp.titolo, note=materiale, misure=sp.misure,
+                                bpm=sp.bpm, anacrusi=sp.anacrusi)
+            proposta = rileva_melodia(parziale)
+            # la musica reale e' fatta a episodi: una voce interna dura
+            # qualche battuta, non tutto il brano. Si spezza la proposta nei
+            # suoi tratti coerenti e si tiene solo quelli che reggono.
+            segmenti = [seg for seg in _spezza_in_tratti(proposta)
+                        if _voce_accettabile(seg, soglia)]
+            if not segmenti:
+                continue
+            punteggio = sum(len(seg) for seg in segmenti)
+            if migliore is None or punteggio > sum(len(x) for x in migliore):
+                migliore = segmenti
+        if migliore is None:
+            break
+        voci.extend(migliore)
+        chiavi = {(round(n.inizio, 6), n.midi) for seg in migliore for n in seg}
+        resto = [n for n in resto if (round(n.inizio, 6), n.midi) not in chiavi]
+    voci.sort(key=lambda seg: seg[0].inizio)
+    return voci
+
+
+def _spezza_in_tratti(linea: List[Nota], salto_max: int = 12,
+                      pausa_max: float = 4.0) -> List[List[Nota]]:
+    """Spezza una linea dove salta di registro o si interrompe a lungo."""
+    fuori: List[List[Nota]] = []
+    for n in linea:
+        if fuori and abs(n.midi - fuori[-1][-1].midi) <= salto_max \
+                and n.inizio - fuori[-1][-1].fine < pausa_max - 1e-6:
+            fuori[-1].append(n)
+        else:
+            fuori.append([n])
+    return fuori
+
+
+def _voce_accettabile(linea: List[Nota], soglia: float) -> bool:
+    if len(linea) < 6:
+        return False
+    altezze = [n.midi for n in linea]
+    if max(altezze) - min(altezze) > 24:
+        return False                       # salta fra i registri: non e' una voce
+    conteggio: Dict[int, int] = {}
+    for a in altezze:
+        conteggio[a] = conteggio.get(a, 0) + 1
+    prime_due = sum(sorted(conteggio.values(), reverse=True)[:2]) / len(altezze)
+    if len(conteggio) < 4 or prime_due > 0.70:
+        return False                       # riempimento armonico
+    intervalli = [abs(b - a) for a, b in zip(altezze, altezze[1:])]
+    congiunto = sum(1 for i in intervalli if 1 <= i <= 2) / max(1, len(intervalli))
+    if congiunto < 0.35:
+        return False                       # salta come un arpeggio d'accompagnamento
+    return qualita_linea(linea) >= soglia
+
+
+def rileva_frammenti(sp: Spartito, gia_usate: List[Nota], min_note: int = 4,
+                     soglia: float = 0.75) -> List[List[Nota]]:
+    """
+    Raccoglie gli INCISI: scale, volatine, riempimenti, code di frase - tutto
+    il materiale melodico breve che non forma una voce continua e che quindi
+    sfuggirebbe sia alla melodia sia alle voci interne.
+
+    Sono proprio le cose che in una partitura scolastica fanno la differenza
+    (la scala che passa a un flauto, il richiamo del clarinetto), e buttarle
+    via significa sprecare meta' dello spartito.
+    """
+    usate = {(round(n.inizio, 6), n.midi) for n in gia_usate}
+    resto = [n for n in sp.note if (round(n.inizio, 6), n.midi) not in usate]
+    if len(resto) < min_note:
+        return []
+
+    # a ogni attacco si tiene la voce superiore del materiale rimasto
+    attacchi = sorted({round(n.inizio, 6) for n in resto})
+    linea: List[Nota] = []
+    for t in attacchi:
+        gruppo = [n for n in resto if abs(n.inizio - t) < 1e-6]
+        if len(gruppo) > 2:
+            continue                     # e' un accordo, non un inciso
+        alta = max(gruppo, key=lambda n: n.midi)
+        if linea and linea[-1].fine > t + 1e-6:
+            linea[-1].durata = t - linea[-1].inizio
+        linea.append(Nota(midi=alta.midi, inizio=t, durata=alta.durata,
+                          rigo=alta.rigo))
+
+    # si spezza in incisi separati dalle pause
+    corse: List[List[Nota]] = []
+    for n in linea:
+        if corse and n.inizio - corse[-1][-1].fine < 1.0 - 1e-6:
+            corse[-1].append(n)
+        else:
+            corse.append([n])
+
+    fuori: List[List[Nota]] = []
+    for corsa in corse:
+        if len(corsa) < min_note:
+            continue
+        altezze = [n.midi for n in corsa]
+        if len(set(altezze)) < 4:
+            continue
+        # un inciso degno di nota ha una direzione: una scala, una volatina,
+        # un arpeggio ascendente. Il tremolio fra due note dell'accordo no.
+        if _corsa_direzionale(altezze) < 3 or qualita_linea(corsa) < soglia:
+            continue
+        fuori.append(corsa)
+    return fuori
+
+
+def _corsa_direzionale(altezze: List[int]) -> int:
+    """Lunghezza del piu' lungo tratto per grado congiunto nella stessa direzione."""
+    migliore = corrente = 1
+    direzione = 0
+    for a, b in zip(altezze, altezze[1:]):
+        passo = b - a
+        if 1 <= abs(passo) <= 2 and (direzione == 0 or (passo > 0) == (direzione > 0)):
+            corrente += 1
+            direzione = passo
+        else:
+            migliore = max(migliore, corrente)
+            corrente = 2 if 1 <= abs(passo) <= 2 else 1
+            direzione = passo if 1 <= abs(passo) <= 2 else 0
+    return max(migliore, corrente)
+
+
 def analizza(sp: Spartito) -> Analisi:
-    melodia = rileva_melodia(sp)
+    return analizza_con_melodia(sp, rileva_melodia(sp))
+
+
+def analizza_con_melodia(sp: Spartito, melodia: List[Nota]) -> Analisi:
+    """Come `analizza`, ma con una melodia gia' decisa (per esempio dall'IA)."""
     armonia = rileva_armonia(sp)
     basso = rileva_basso(sp, armonia)
+    figurazione = rileva_figurazione(sp, melodia)
+    voci = rileva_voci_interne(sp, melodia + basso)
+    usate = melodia + basso + [n for v in voci for n in v]
+    frammenti = rileva_frammenti(sp, usate)
     groove, sudd = rileva_groove(sp)
     frasi = rileva_frasi(sp, melodia)
     return Analisi(melodia=melodia, armonia=armonia, basso=basso,
-                   groove=groove, suddivisione=sudd, frasi=frasi)
+                   figurazione=figurazione, voci_interne=voci,
+                   frammenti=frammenti, groove=groove, suddivisione=sudd,
+                   frasi=frasi)

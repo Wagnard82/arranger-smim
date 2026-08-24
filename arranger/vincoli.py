@@ -156,6 +156,8 @@ def filtro_estensione(part: Partitura) -> None:
         for rigo in sorted({e.rigo for e in p.eventi}):
             flusso = [e for e in p.eventi if e.rigo == rigo]
             for tratto in tratti(flusso):
+                if any(e.letterale for e in tratto):
+                    continue    # copia dell'originale: registri gia' corretti
                 monodico = all(len(e.altezze) == 1 for e in tratto)
                 if monodico:
                     delta = ottava_migliore([e.altezze[0] for e in tratto], lo, hi)
@@ -257,6 +259,8 @@ def filtro_salti(part: Partitura) -> None:
         for rigo in sorted({e.rigo for e in p.eventi}):
             flusso = [e for e in p.eventi if e.rigo == rigo]
             for tratto in tratti(flusso):
+                if any(e.letterale for e in tratto):
+                    continue
                 monodici = [e for e in tratto if len(e.altezze) == 1]
                 i = 1
                 while i < len(monodici):
@@ -314,7 +318,7 @@ def filtro_alterazioni(part: Partitura) -> None:
         if strumento(p.strumento).percussione:
             continue
         for e in p.eventi:
-            if e.pausa:
+            if e.pausa or e.letterale:
                 continue
             nuove = []
             cambiato = False
@@ -396,8 +400,9 @@ def filtro_idiomatico(part: Partitura) -> None:
                         f"accordo non diteggiabile -> ridotto alla fondamentale "
                         f"(resta la sigla).")
                 else:
+                    unici = sorted(set(pos))
                     limite = L.accordi_max
-                    e.altezze = sorted(pos)[:limite] if limite < len(pos) else sorted(pos)
+                    e.altezze = unici[:limite] if limite < len(unici) else unici
 
         # ---- archi: prima posizione e cambi di corda
         if st.famiglia == "archi" and not L.cambi_posizione and p.ruolo != "melodia":
@@ -454,6 +459,8 @@ def filtro_incroci(part: Partitura) -> None:
         lo, hi = st.ambito(part.livello)
         sinistra = [e for e in p.eventi if e.rigo == 2 and not e.pausa]
         for e in (x for x in p.eventi if x.rigo == 1 and not x.pausa):
+            if e.letterale:
+                continue        # e' la scrittura dell'originale: si rispetta
             sotto = [s for s in sinistra
                      if s.inizio < e.fine - 1e-6 and s.fine > e.inizio + 1e-6]
             if not sotto:

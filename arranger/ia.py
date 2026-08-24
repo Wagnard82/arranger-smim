@@ -83,6 +83,110 @@ def _sintesi_analisi(analisi: Analisi, cfg: Configurazione, titolo: str) -> str:
             f"Griglia armonica: {griglia}")
 
 
+def melodia_per_misura(sp, ipotesi_per_misura: Dict[int, List[str]],
+                       cfg: Configurazione, titolo: str = ""
+                       ) -> Optional[Dict[int, int]]:
+    """
+    Chiede al modello, misura per misura, QUALE delle ipotesi melodiche
+    e' quella giusta. Serve dove le euristiche sono deboli: melodia che
+    migra fra le mani, voci raddoppiate, sezioni senza melodia.
+
+    `ipotesi_per_misura` = {numero_misura: ["Do5 Re5 Mi5", "Do3 Sol3 ...", ...]}
+    Ritorna {numero_misura: indice_ipotesi}.
+    """
+    if not cfg.usa_ia or not disponibile() or not ipotesi_per_misura:
+        return None
+    righe = []
+    for numero in sorted(ipotesi_per_misura)[:80]:
+        opzioni = " || ".join(f"[{i}] {t}"
+                              for i, t in enumerate(ipotesi_per_misura[numero]))
+        righe.append(f"mis {numero}: {opzioni}")
+    sistema = ("Sei un musicista esperto di analisi. Rispondi SOLO con JSON "
+               "valido, senza backtick.")
+    prompt = (
+        f"Brano: {titolo}\n"
+        "Per ogni misura ti do le linee candidate a essere LA MELODIA, "
+        "estratte da uno spartito pianistico (voce superiore, voce inferiore, "
+        "linea neutra). Scegli per ciascuna misura l'indice della linea che "
+        "un ascoltatore canterebbe. Preferisci la continuita': la melodia non "
+        "salta da una voce all'altra a ogni battuta.\n\n"
+        + "\n".join(righe) +
+        '\n\nRispondi: {"scelte": {"1": 0, "2": 0, "3": 1}}')
+    dati = _json(_chiama(prompt, sistema, cfg.modello_ia, max_token=2000))
+    if not dati or "scelte" not in dati:
+        return None
+    fuori: Dict[int, int] = {}
+    for k, v in dati["scelte"].items():
+        try:
+            fuori[int(k)] = int(v)
+        except (TypeError, ValueError):
+            continue
+    return fuori or None
+
+
+def consiglia_arrangiamento(analisi: Analisi, cfg: Configurazione,
+                            titolo: str = "", riferimenti: str = ""
+                            ) -> Optional[dict]:
+    """
+    Chiede stile e tipo di accompagnamento adatti al brano, sfruttando anche
+    quello che si sa del pezzo (vedi `riferimenti_web`).
+
+    Ritorna {"stile", "accompagnamento", "densita", "bpm", "motivazione"}.
+    """
+    if not cfg.usa_ia or not disponibile():
+        return None
+    sistema = ("Sei un arrangiatore per orchestra scolastica (scuola media a "
+               "indirizzo musicale). Rispondi SOLO con JSON valido.")
+    prompt = (
+        f"{_sintesi_analisi(analisi, cfg, titolo)}\n"
+        f"Suddivisione ritmica prevalente: {analisi.suddivisione}\n"
+        f"Attacchi tipici nella misura: {analisi.groove}\n"
+        + (f"\nInformazioni sul brano originale:\n{riferimenti}\n"
+           if riferimenti else "") +
+        "\nProponi come arrangiarlo per questo organico e livello. "
+        'Rispondi: {"stile": "Normale|Cinematico|Jazz", '
+        '"accompagnamento": "blocchi|arpeggio|ribattuto|pad|walking", '
+        '"densita": "rada|media|piena", "bpm": 90, '
+        '"motivazione": "una frase"}')
+    dati = _json(_chiama(prompt, sistema, cfg.modello_ia, max_token=600))
+    if not dati or "stile" not in dati:
+        return None
+    if dati.get("stile") not in ("Normale", "Cinematico", "Jazz"):
+        dati["stile"] = cfg.stile
+    return dati
+
+
+def riferimenti_web(titolo: str, cfg: Configurazione) -> Optional[str]:
+    """
+    Cerca informazioni sull'incisione originale (stile, organico, tempo,
+    struttura) usando la ricerca web del modello.
+
+    NOTA: l'API non ascolta l'audio. Non e' possibile confrontare il nostro
+    arrangiamento con una registrazione: si puo' solo raccogliere cio' che
+    dell'originale e' stato scritto, e usarlo come indizio.
+    """
+    if not cfg.usa_ia or not disponibile() or not titolo:
+        return None
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+        risp = client.messages.create(
+            model=cfg.modello_ia, max_tokens=800,
+            system=("Rispondi in italiano, in modo sintetico e fattuale. "
+                    "Se non trovi il brano, dillo in una riga."),
+            tools=[{"type": "web_search_20250305", "name": "web_search"}],
+            messages=[{"role": "user", "content":
+                       f"Cerca informazioni sul brano '{titolo}': genere, "
+                       "andamento e tempo indicativo, organico della versione "
+                       "piu' nota, struttura (strofa/ritornello), carattere "
+                       "dell'accompagnamento. Massimo 8 righe."}],
+        )
+        return "".join(b.text for b in risp.content
+                       if getattr(b, "type", "") == "text").strip() or None
+    except Exception:
+        return None
+
+
 def piano_orchestrazione(analisi: Analisi, cfg: Configurazione, id_parti: List[str],
                          titolo: str = "") -> Optional[Dict[int, List[str]]]:
     """Chiede al modello chi porta la melodia in ogni frase. -> {frase: [id_parti]}"""

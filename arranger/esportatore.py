@@ -121,7 +121,8 @@ class EsportatoreMusicXML:
         if self.p.compositore:
             righe.append(f'    <creator type="composer">{escape(self.p.compositore)}</creator>')
         righe.append("    <encoding>")
-        righe.append("      <software>Arranger SMIM</software>")
+        from .versione import VERSIONE
+        righe.append(f"      <software>Arranger SMIM {VERSIONE}</software>")
         righe.append("    </encoding>")
         righe.append("  </identification>")
         righe.append("  <movement-title>"
@@ -419,7 +420,7 @@ def taglia_su_misura(eventi: List[Evento], m: Misura
         b = min(e.fine, m.fine)
         frammento = Evento(inizio=a, durata=b - a, altezze=list(e.altezze),
                            articolazione=e.articolazione, dinamica=e.dinamica,
-                           sigla=e.sigla, rigo=e.rigo,
+                           sigla=e.sigla, rigo=e.rigo, letterale=e.letterale,
                            gradazione=e.gradazione if a <= e.inizio + 1e-6 else None,
                            fine_gradazione=e.fine_gradazione
                            and b >= e.fine - 1e-6)

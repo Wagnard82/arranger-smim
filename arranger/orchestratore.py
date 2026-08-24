@@ -83,6 +83,42 @@ def _accordo_a(armonia: List[Accordo], t: float) -> Optional[Accordo]:
 # --------------------------------------------------------------------------
 
 
+def parti_originale(sp: Spartito) -> List[Parte]:
+    """
+    MODALITA' CONFRONTO: ricostruisce lo spartito di partenza come parte in
+    fondo alla partitura, cosi' da poterlo leggere sotto l'arrangiamento e
+    verificare a colpo d'occhio melodia, armonia e ritmo.
+
+    Non passa dai filtri di validazione: e' il testo originale, va lasciato
+    esattamente com'e'.
+    """
+    parte = Parte(id="originale", nome="Originale (confronto)", abbrev="Orig.",
+                  strumento="pianoforte", chiave="G", trasposizione=0,
+                  monofonico=False, programma_midi=0, righi=2, ruolo="confronto")
+    fine = sp.durata_totale
+    inizio = sp.misure[0].inizio if sp.misure else 0.0
+
+    for rigo in (1, 2):
+        note = sorted([n for n in sp.note if n.rigo == rigo],
+                      key=lambda n: (n.inizio, n.midi))
+        if not note:
+            parte.eventi.extend(_riempi_pause([], inizio, fine, rigo))
+            continue
+        attacchi = sorted({round(n.inizio, 6) for n in note})
+        eventi: List[Evento] = []
+        for i, t in enumerate(attacchi):
+            gruppo = [n for n in note if abs(n.inizio - t) < 1e-6]
+            prossimo = attacchi[i + 1] if i + 1 < len(attacchi) else fine
+            durata = min(min(n.durata for n in gruppo), prossimo - t)
+            if durata <= 1e-6:
+                continue
+            eventi.append(Evento(inizio=t, durata=durata,
+                                 altezze=sorted({n.midi for n in gruppo}),
+                                 rigo=rigo))
+        parte.eventi.extend(_riempi_pause(eventi, inizio, fine, rigo))
+    return [parte]
+
+
 def costruisci_parti(cfg: Configurazione) -> List[Parte]:
     parti: List[Parte] = []
     for chiave in ORDINE_PARTITURA:
@@ -102,7 +138,8 @@ def costruisci_parti(cfg: Configurazione) -> List[Parte]:
     return parti
 
 
-def assegna_ruoli(parti: List[Parte], stile: str) -> None:
+def assegna_ruoli(parti: List[Parte], stile: str, livello_didattico: str = "1a Media"
+                  ) -> None:
     """Assegna il ruolo di base a ogni parte secondo il template di stile."""
     famiglia_idx: Dict[str, int] = {}
     for p in parti:
@@ -132,6 +169,19 @@ def assegna_ruoli(parti: List[Parte], stile: str) -> None:
         elif p.strumento == "percussioni":
             p.ruolo = "ritmo"
 
+    # se non c'e' il violoncello, il basso va comunque affidato: prende la
+    # linea grave lo strumento con l'estensione piu' bassa fra quelli presenti
+    if not any(p.ruolo == "basso" for p in parti):
+        candidati = [p for p in parti
+                     if not strumento(p.strumento).percussione
+                     and "basso" in strumento(p.strumento).ruoli
+                     and p.ruolo != "melodia"]
+        if candidati:
+            piu_grave = min(candidati,
+                            key=lambda p: strumento(p.strumento).ambito(
+                                livello_didattico)[0])
+            piu_grave.ruolo = "basso"
+
 
 # --------------------------------------------------------------------------
 # Staffetta della melodia
@@ -139,7 +189,8 @@ def assegna_ruoli(parti: List[Parte], stile: str) -> None:
 
 
 def pianifica_staffetta(parti: List[Parte], analisi: Analisi,
-                        cfg: Configurazione) -> Dict[int, List[str]]:
+                        cfg: Configurazione,
+                        escludi: Optional[set] = None) -> Dict[int, List[str]]:
     """
     Per ogni frase decide QUALI parti portano la melodia.
     Restituisce {indice_frase: [id_parte, ...]} (il primo e' il solista).
@@ -155,6 +206,10 @@ def pianifica_staffetta(parti: List[Parte], analisi: Analisi,
                           or p.strumento in ("flauto", "violino", "clarinetto",
                                              "tromba", "sax", "glockenspiel",
                                              "metallofono"))]
+    if escludi and not cfg.strumenti_melodia:
+        rimasti = [p for p in candidati if p.id not in escludi]
+        if rimasti:
+            candidati = rimasti
     if not candidati:
         candidati = [p for p in parti if not strumento(p.strumento).percussione][:1]
 
@@ -213,8 +268,21 @@ def linea_melodia(melodia: List[Nota], st: Strumento, liv: str,
     # dell'originale. Se la frase non ci sta tutta, si spezza sui respiri
     # (pause) e si sceglie un'ottava per ogni tratto: mai nota per nota,
     # altrimenti nascono salti d'ottava dentro una scala.
+    globale = _ottava_migliore([n.midi for n in note], lo, hi)
+    if all(lo <= n.midi + globale <= hi for n in note):
+        # tutta la frase in una sola ottava: profilo identico all'originale
+        for n in note:
+            ev.append(Evento(inizio=n.inizio, durata=n.durata,
+                             altezze=[n.midi + globale]))
+        return ev
+
+    # non ci sta tutta: si spezza sui respiri, preferendo pero' l'ottava piu'
+    # vicina a quella del tratto precedente per non strappare la linea
+    precedente = globale
     for tratto in _tratti(note):
-        scarto = _ottava_migliore([n.midi for n in tratto], lo, hi)
+        scarto = _ottava_migliore([n.midi for n in tratto], lo, hi,
+                                  preferito=precedente)
+        precedente = scarto
         for n in tratto:
             ev.append(Evento(inizio=n.inizio, durata=n.durata,
                              altezze=[nota_in_ambito(n.midi + scarto, lo, hi)]))
@@ -229,7 +297,7 @@ def _leviga_selettiva(eventi: List[Evento], lo: int, hi: int,
     all'ingresso della melodia, che non puo' essere spostato.
     """
     for i, e in enumerate(eventi):
-        if e.pausa or len(e.altezze) != 1 or id(e) in immutabili:
+        if e.pausa or len(e.altezze) != 1 or id(e) in immutabili or e.letterale:
             continue
         vicini: List[Tuple[int, float]] = []
         for j, contiguo in ((i - 1, lambda a, b: abs(a.fine - b.inizio) < 1e-6),
@@ -303,7 +371,8 @@ def _tratti(note: List[Nota], respiro: float = 1.0) -> List[List[Nota]]:
     return fuori
 
 
-def _ottava_migliore(midis: List[int], lo: int, hi: int) -> int:
+def _ottava_migliore(midis: List[int], lo: int, hi: int,
+                     preferito: int = 0) -> int:
     """
     Trasposizione d'ottava unica che fa stare piu' note possibile nell'ambito
     (a parita', quella che centra meglio il registro).
@@ -318,7 +387,7 @@ def _ottava_migliore(midis: List[int], lo: int, hi: int) -> int:
         # a parita' di note fuori ambito si preferisce NON spostare nulla:
         # centrare il registro alzerebbe di un'ottava anche i bassi che
         # stanno benissimo dove sono
-        punteggio = (fuori, abs(delta), abs(medio - centro))
+        punteggio = (fuori, abs(delta - preferito), abs(delta), abs(medio - centro))
         if punteggio_migliore is None or punteggio < punteggio_migliore:
             migliore, punteggio_migliore = delta, punteggio
     return migliore
@@ -360,7 +429,7 @@ def leviga_ottave(eventi: List[Evento], lo: int, hi: int) -> List[Evento]:
     """
     prec: Optional[int] = None
     for e in eventi:
-        if e.pausa or len(e.altezze) != 1:
+        if e.pausa or len(e.altezze) != 1 or e.letterale:
             prec = None
             continue
         if prec is None:
@@ -472,12 +541,150 @@ def arpeggio(analisi: Analisi, st: Strumento, liv: str,
     return ev
 
 
+def riproduci_figurazione(note: List[Nota], st: Strumento, liv: str,
+                          misure: List[Misura], max_note: int = 3,
+                          rigo: int = 1, mantieni_ottave: bool = False
+                          ) -> List[Evento]:
+    """
+    Riproduce l'accompagnamento COSI' COM'E' SCRITTO nell'originale: stessi
+    attacchi, stesse durate, stessa figurazione (arpeggi, bassi ribattuti,
+    pattern ritmici). Le altezze vengono solo ridotte di numero e riportate
+    nell'ambito dello strumento.
+
+    E' la differenza fra un pianoforte che accompagna e uno che tiene una
+    semibreve per battuta.
+    """
+    if not note:
+        return []
+    L = livello(liv)
+    lo, hi = st.ambito(liv)
+    massimo = min(max_note, st.polifonia_max, L.accordi_max)
+
+    attacchi = sorted({round(n.inizio, 6) for n in note})
+    ev: List[Evento] = []
+    for i, t in enumerate(attacchi):
+        gruppo = sorted({n.midi for n in note if abs(n.inizio - t) < 1e-6})
+        if not gruppo:
+            continue
+        if len(gruppo) > massimo:
+            # si tengono gli estremi (basso e voce superiore) e si riempie
+            scelte = [gruppo[0], gruppo[-1]] + gruppo[1:-1][:max(0, massimo - 2)]
+            gruppo = sorted(set(scelte))[:massimo]
+        durata = min(n.durata for n in note if abs(n.inizio - t) < 1e-6)
+        if i + 1 < len(attacchi):
+            durata = min(durata, attacchi[i + 1] - t)
+        m = next((x for x in misure if x.inizio - 1e-6 <= t < x.fine - 1e-6), None)
+        if m is not None:
+            durata = min(durata, m.fine - t)
+        if durata <= 1e-6:
+            continue
+        ev.append(Evento(inizio=t, durata=durata, altezze=gruppo, rigo=rigo,
+                         letterale=True))
+
+    if mantieni_ottave:
+        # copia per il pianoforte: le ottave dell'originale sono gia' quelle
+        # giuste, spostarle e' il modo piu' rapido per ottenere collisioni fra
+        # le mani e registri assurdi
+        for e in ev:
+            e.altezze = sorted({max(lo, min(hi, a)) for a in e.altezze})
+        return ev
+
+    # una sola ottava per tratto, per non spezzare la figurazione
+    for tratto in _tratti_eventi(ev):
+        altezze = [a for e in tratto for a in e.altezze]
+        scarto = _ottava_migliore(altezze, lo, hi)
+        if scarto:
+            for e in tratto:
+                e.altezze = [a + scarto for a in e.altezze]
+    for e in ev:
+        e.altezze = sorted({nota_in_ambito(a, lo, hi) for a in e.altezze})
+    return ev
+
+
+def _tratti_eventi(eventi: List[Evento], respiro: float = 1.0) -> List[List[Evento]]:
+    fuori: List[List[Evento]] = []
+    for e in eventi:
+        if fuori and e.inizio - fuori[-1][-1].fine < respiro - 1e-6:
+            fuori[-1].append(e)
+        else:
+            fuori.append([e])
+    return fuori
+
+
+def ritmo_figurazione(figurazione: List[Nota], a: float, b: float
+                      ) -> List[Tuple[float, float]]:
+    """Solo gli attacchi e le durate dell'accompagnamento originale."""
+    dentro = [n for n in figurazione if a - 1e-6 <= n.inizio < b - 1e-6]
+    attacchi = sorted({round(n.inizio, 6) for n in dentro})
+    fuori: List[Tuple[float, float]] = []
+    for i, t in enumerate(attacchi):
+        fine = attacchi[i + 1] if i + 1 < len(attacchi) else b
+        fuori.append((t, fine - t))
+    return fuori
+
+
+def dirada_ritmo(ritmo: List[Tuple[float, float]], misure: List[Misura],
+                 per_movimento: int = 1) -> List[Tuple[float, float]]:
+    """
+    Riduce il ritmo dell'accompagnamento a pochi attacchi per movimento.
+    Una chitarra che pesta l'accordo su ogni croma della figurazione non
+    accompagna: fa rumore.
+    """
+    if not ritmo or not misure:
+        return ritmo
+    passo = misure[0].unita_movimento / max(1, per_movimento)
+    tenuti: List[Tuple[float, float]] = []
+    ultimo = None
+    for (t, durata) in ritmo:
+        cella = round(t / passo)
+        if cella == ultimo:
+            continue
+        ultimo = cella
+        tenuti.append((t, durata))
+    fuori: List[Tuple[float, float]] = []
+    for i, (t, _d) in enumerate(tenuti):
+        fine = tenuti[i + 1][0] if i + 1 < len(tenuti) else t + passo
+        fuori.append((t, fine - t))
+    return fuori
+
+
+def accordi_su_ritmo(analisi: Analisi, st: Strumento, liv: str,
+                     ritmo: List[Tuple[float, float]],
+                     arpeggia: bool = False) -> List[Evento]:
+    """
+    Note dell'armonia disposte sul ritmo dell'accompagnamento originale.
+    Serve agli strumenti che non possono copiare la figurazione alla lettera
+    (chitarra, secondo pianoforte) ma devono comunque respirare con il brano.
+    """
+    L = livello(liv)
+    lo, hi = st.ambito(liv)
+    n_note = min(L.accordi_max, st.polifonia_max, 4)
+    ev: List[Evento] = []
+    passo = 0
+    for (t, durata) in ritmo:
+        acc = _accordo_a(analisi.armonia, t)
+        if acc is None or durata <= 1e-6:
+            continue
+        note = sorted(set(voicing(acc, max(lo, 45), min(hi, 79), n_note=n_note)))
+        if not note:
+            continue
+        if arpeggia:
+            ev.append(Evento(inizio=t, durata=durata,
+                             altezze=[note[passo % len(note)]]))
+            passo += 1
+        else:
+            ev.append(Evento(inizio=t, durata=durata, altezze=note,
+                             sigla=acc.sigla()))
+    return ev
+
+
 def linea_basso(analisi: Analisi, st: Strumento, liv: str) -> List[Evento]:
+    """Riproduce la linea di basso dell'originale, ritmo compreso."""
     lo, hi = st.ambito(liv)
     ev = [Evento(inizio=n.inizio, durata=n.durata,
                  altezze=[nota_in_ambito(n.midi, lo, hi)])
           for n in analisi.basso]
-    return _fondi_uguali(leviga_ottave(ev, lo, hi))
+    return leviga_ottave(ev, lo, hi)
 
 
 def basso_sostenuto(analisi: Analisi, st: Strumento, liv: str,
@@ -639,7 +846,7 @@ def pattern_percussioni(stile: str, liv: str, misure: List[Misura],
 def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
              piano_melodia: Optional[Dict[int, List[str]]] = None) -> Partitura:
     parti = costruisci_parti(cfg)
-    assegna_ruoli(parti, cfg.stile)
+    assegna_ruoli(parti, cfg.stile, cfg.livello)
     L = livello(cfg.livello)
     misure = sp.misure
     inizio = misure[0].inizio if misure else 0.0
@@ -652,7 +859,22 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                 p.ruolo = "melodia"
             elif p.ruolo == "melodia":
                 p.ruolo = "controcanto"
-    staffetta = piano_melodia or pianifica_staffetta(parti, analisi, cfg)
+    # la figurazione originale si conserva dalla 2a media in su: in 1a i
+    # valori brevi e i salti degli arpeggi non sono ancora alla portata
+    usa_figurazione = (livello(cfg.livello).durata_minima <= 0.5
+                       and len(analisi.figurazione) > 0)
+    # le voci interne dell'originale vengono distribuite ai controcanti PRIMA
+    # della staffetta: chi ha una seconda voce da suonare non deve anche
+    # contendersi la melodia
+    contrappunti = [p for p in parti if p.ruolo == "controcanto"]
+    voci_assegnate: Dict[str, List[Nota]] = {}
+    if usa_figurazione:          # dalla 2a media in su
+        for i, p_c in enumerate(contrappunti):
+            if i < len(analisi.voci_interne):
+                voci_assegnate[p_c.id] = analisi.voci_interne[i]
+
+    staffetta = piano_melodia or pianifica_staffetta(
+        parti, analisi, cfg, escludi=set(voci_assegnate))
     if piano_melodia:
         for ids in piano_melodia.values():
             for i in ids:
@@ -681,6 +903,7 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
 
         # ---------------------------------------------------- melodia (staffetta)
         ev_melodia: List[Evento] = []
+        ev_originali: List[Evento] = []     # voci interne copiate dall'originale
         porta_melodia = sorted(i for i, squadra in staffetta.items() if p.id in squadra)
         # frasi consecutive dello stesso strumento vengono trattate come un
         # blocco unico: scegliere l'ottava frase per frase creerebbe un salto
@@ -727,6 +950,12 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                         note = voicing(acc, 40, 64, n_note=2)
                         ev.append(Evento(inizio=acc.inizio, durata=acc.durata,
                                          altezze=note, sigla=acc.sigla()))
+                elif usa_figurazione and ritmo_figurazione(analisi.figurazione, a, b):
+                    ev.extend(accordi_su_ritmo(
+                        sotto, st, cfg.livello,
+                        dirada_ritmo(ritmo_figurazione(analisi.figurazione, a, b),
+                                     mis_sub, per_movimento=1),
+                        arpeggia=(p.variante % 2 == 1)))
                 elif p.variante % 2 == 1:
                     # la seconda chitarra arpeggia invece di raddoppiare i blocchi
                     arp = arpeggio(sotto, st, cfg.livello, passo=0.5)
@@ -737,11 +966,27 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                     ev.extend(accordi_a_blocchi(sotto, st, cfg.livello, analisi.groove, mis_sub))
 
             elif p.strumento == "pianoforte":
-                # la mano destra dipende dalla VARIANTE: due pianoforti non
-                # devono suonare la stessa identica parte
-                if cfg.stile == "Cinematico":
+                ritmo = ritmo_figurazione(analisi.figurazione, a, b)
+                copia_fedele = (usa_figurazione and p.variante % 2 == 0
+                                and cfg.stile == "Normale")
+                if copia_fedele:
+                    # il pianoforte accompagna con la figurazione scritta
+                    # nell'originale: arpeggi e pattern ritmici si conservano
+                    destra = riproduci_figurazione(
+                        [n for n in analisi.figurazione
+                         if n.rigo == 1 and a - 1e-6 <= n.inizio < b - 1e-6],
+                        st, cfg.livello, mis_sub, max_note=3, rigo=1,
+                        mantieni_ottave=True)
+                    # se nell'originale la destra fa solo melodia, qui tace:
+                    # inventarle accordi produce solo collisioni con la sinistra
+                elif cfg.stile == "Cinematico":
                     destra = arpeggio(sotto, st, cfg.livello, passo=0.5,
                                       ampio=(p.variante % 2 == 0))
+                elif usa_figurazione and ritmo:
+                    destra = accordi_su_ritmo(
+                        sotto, st, cfg.livello,
+                        dirada_ritmo(ritmo, mis_sub, per_movimento=2),
+                        arpeggia=(p.variante % 2 == 1))
                 elif p.variante % 2 == 1:
                     destra = arpeggio(sotto, st, cfg.livello, passo=0.5, ampio=False)
                 else:
@@ -751,6 +996,13 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                 for e in destra:
                     e.rigo = 1
                 ev.extend(destra)
+
+            elif p.ruolo == "controcanto" and p.id in voci_assegnate:
+                # seconda voce / contrappunto gia' scritti nell'originale:
+                # si riprendono tali e quali, solo trasposti d'ottava
+                voce = linea_melodia(voci_assegnate[p.id], st, cfg.livello, (a, b))
+                ev_originali.extend(voce)
+                ev.extend(voce)
 
             elif p.ruolo == "controcanto":
                 if cfg.stile == "Cinematico" and st.famiglia in ("fiati", "ottoni"):
@@ -770,19 +1022,34 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
             # la sinistra copre sempre tutto il brano, anche dove la destra
             # porta la melodia (altrimenti resterebbe muta nelle frasi cantate)
             tutto = _sotto_analisi(analisi, inizio, fine)
+            # la mano sinistra si riprende PER INTERO dall'originale, bassi
+            # compresi: se la melodia sta al basso, escluderla lascerebbe il
+            # pianoforte con i soli accordi interni
+            sinistra_originale = [n for n in sp.note if n.rigo == 2]
             if cfg.stile == "Jazz":
                 sinistra = walking_bass(tutto, st, cfg.livello, misure)
+            elif usa_figurazione and p.variante % 2 == 0 and sinistra_originale:
+                # la mano sinistra dell'originale e' gia' la parte giusta:
+                # arpeggi e figure ritmiche vanno conservati, non appiattiti
+                sinistra = riproduci_figurazione(sinistra_originale, st,
+                                                 cfg.livello, misure,
+                                                 max_note=3, rigo=2,
+                                                 mantieni_ottave=True)
             elif p.variante % 2 == 1:
                 sinistra = basso_sostenuto(tutto, st, cfg.livello, misure)
             else:
                 sinistra = linea_basso(tutto, st, cfg.livello)
             for e in sinistra:
                 e.rigo = 2
-                e.altezze = [nota_in_ambito(x, 36, 59) for x in e.altezze]
+                if not e.letterale:
+                    e.altezze = [nota_in_ambito(x, 36, 59) for x in e.altezze]
             ev = [e for e in ev if e.rigo != 2] + sinistra
 
-        id_melodia = {id(e) for e in ev_melodia}
-        ev = ev_melodia + spezza_su_misure(
+        # melodia e voci interne sono testo originale: non si levigano, non si
+        # spezzano, non si trasportano se non per intere frasi
+        id_melodia = {id(e) for e in ev_melodia + ev_originali}
+        intatti = [e for e in ev if id(e) in id_melodia]
+        ev = intatti + spezza_su_misure(
             [e for e in ev if id(e) not in id_melodia], misure)
         # raccorda le giunzioni fra melodia e accompagnamento dentro la stessa
         # parte: si muove solo l'accompagnamento, la melodia resta intatta
@@ -790,7 +1057,9 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
         ordinati = sorted(ev, key=lambda e: (e.rigo, e.inizio))
         for _ in range(3):        # poche passate: la correzione si propaga
             _leviga_selettiva(ordinati, lo_p, hi_p, id_melodia)
-        _respiro_prima_della_melodia(ordinati, id_melodia)
+        # il respiro prima dell'entrata della melodia si puo' prendere anche
+        # accorciando una voce interna: si cambia una durata, non un'altezza
+        _respiro_prima_della_melodia(ordinati, {id(e) for e in ev_melodia})
 
         if p.righi == 2:
             p.eventi = (_riempi_pause([e for e in ev if e.rigo == 1], inizio, fine, 1) +
@@ -799,6 +1068,19 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
             p.eventi = _riempi_pause(ev, inizio, fine)
 
         applica_dinamiche(p, sp.dinamiche, sp.gradazioni)
+
+    if usa_figurazione:
+        # tutto il materiale dell'originale va sfruttato: voci interne rimaste
+        # fuori e incisi vengono affidati a chi tace, o a chi sta solo
+        # riempiendo l'armonia
+        residuo = [seg for seg in analisi.voci_interne
+                   if not any(seg is v for v in voci_assegnate.values())]
+        materiale = sorted(residuo + analisi.frammenti,
+                           key=lambda seg: seg[0].inizio)
+        part.report.extend(distribuisci_frammenti(parti, materiale,
+                                                  cfg.livello, misure))
+
+    part.report.extend(alleggerisci_per_solista(part, analisi))
 
     return part
 
@@ -863,6 +1145,206 @@ def applica_dinamiche(parte: Parte, dinamiche: List[Tuple[float, str]],
                 candidato = flusso[-1]
             candidato.dinamica = segno
             ultimo = segno
+
+
+# strumenti che, se portano la melodia, vanno protetti: hanno poca proiezione
+# e qualunque accompagnamento denso li copre
+SOLISTI_DEBOLI = {"chitarra", "glockenspiel", "metallofono", "violoncello"}
+
+
+def alleggerisci_per_solista(part: Partitura, analisi: Analisi) -> List[str]:
+    """
+    Quando la melodia e' affidata a uno strumento debole (tipicamente la
+    chitarra) l'accompagnamento va DIRADATO, altrimenti il solista sparisce.
+
+    Nei tratti interessati: si tolgono i raddoppi della melodia, gli accordi
+    scendono a due note, le percussioni battono solo sul primo movimento e
+    tutti scendono di dinamica. Il solista sale a mezzoforte.
+    """
+    note_report: List[str] = []
+    attacchi_melodia = {round(n.inizio, 6): n.midi for n in analisi.melodia}
+
+    for solista in part.parti:
+        if solista.strumento not in SOLISTI_DEBOLI or solista.ruolo != "melodia":
+            continue
+        tratti = _tratti_solista(solista, attacchi_melodia)
+        if not tratti:
+            continue
+        for (a, b) in tratti:
+            for e in solista.eventi:
+                if not e.pausa and a - 1e-6 <= e.inizio < b - 1e-6:
+                    e.dinamica = e.dinamica or "mf"
+            for p in part.parti:
+                if p is solista:
+                    continue
+                _dirada_parte(p, a, b, attacchi_melodia)
+        note_report.append(
+            f"[Solista] {solista.nome}: accompagnamento alleggerito nei tratti "
+            f"in cui porta la melodia ({len(tratti)} tratti).")
+    return note_report
+
+
+def _tratti_solista(parte: Parte, attacchi_melodia: Dict[float, int],
+                    respiro: float = 2.0) -> List[Tuple[float, float]]:
+    """Intervalli in cui la parte sta effettivamente suonando la melodia."""
+    suonate = [e for e in parte.eventi
+               if not e.pausa and round(e.inizio, 6) in attacchi_melodia]
+    tratti: List[List[float]] = []
+    for e in suonate:
+        if tratti and e.inizio - tratti[-1][1] < respiro - 1e-6:
+            tratti[-1][1] = e.fine
+        else:
+            tratti.append([e.inizio, e.fine])
+    return [(a, b) for a, b in tratti]
+
+
+def _dirada_parte(p: Parte, a: float, b: float,
+                  attacchi_melodia: Dict[float, int]) -> None:
+    st = strumento(p.strumento)
+    nuovi: List[Evento] = []
+    for e in p.eventi:
+        if e.pausa or not (e.inizio < b - 1e-6 and e.fine > a + 1e-6):
+            nuovi.append(e)
+            continue
+        # via i raddoppi della melodia: sotto un solista debole sono deleteri
+        altezza_melodia = attacchi_melodia.get(round(e.inizio, 6))
+        if (altezza_melodia is not None and len(e.altezze) == 1
+                and e.altezze[0] % 12 == altezza_melodia % 12
+                and p.ruolo in ("melodia", "controcanto")):
+            nuovi.append(Evento(inizio=e.inizio, durata=e.durata, altezze=[],
+                                rigo=e.rigo))
+            continue
+        if st.percussione:
+            # solo il primo movimento della misura
+            if abs(e.inizio - a) > 1e-6 and abs(e.inizio % 4.0) > 1e-6:
+                nuovi.append(Evento(inizio=e.inizio, durata=e.durata,
+                                    altezze=[], rigo=e.rigo))
+                continue
+        if len(e.altezze) > 2:
+            e.altezze = [e.altezze[0], e.altezze[-1]]
+        e.dinamica = "p"
+        nuovi.append(e)
+    p.eventi = nuovi
+
+
+def distribuisci_frammenti(parti: List[Parte], frammenti: List[List[Nota]],
+                           liv: str, misure: List[Misura]) -> List[str]:
+    """
+    Affida gli incisi rimasti (scale, volatine, riempimenti) agli strumenti
+    che in quel punto tacciono. A rotazione, cosi' che il materiale si
+    distribuisca invece di ammucchiarsi su una parte sola.
+    """
+    note_report: List[str] = []
+    candidati = [p for p in parti
+                 if not strumento(p.strumento).percussione and p.righi == 1]
+    # prima i monodici (fiati, archi): una scala su una chitarra strimpellata
+    # non si sente, su un flauto si'
+    candidati.sort(key=lambda p: (not strumento(p.strumento).monofonico,
+                                  p.ruolo == "basso"))
+    if not candidati:
+        return note_report
+    turno = 0
+    for frammento in frammenti:
+        a = frammento[0].inizio
+        b = frammento[-1].fine
+        # 1) chi tace; 2) chi sta facendo solo riempimento armonico: un inciso
+        #    dell'originale vale piu' di un pad inventato
+        scelto = None
+        for priorita in ("tace", "armonia", "controcanto"):
+            for k in range(len(candidati)):
+                p = candidati[(turno + k) % len(candidati)]
+                if priorita == "tace" and not _tace_in(p, a, b):
+                    continue
+                if priorita != "tace" and p.ruolo != priorita:
+                    continue
+                st = strumento(p.strumento)
+                lo, hi = st.ambito(liv)
+                scarto = _ottava_migliore([n.midi for n in frammento], lo, hi)
+                if any(not (lo <= n.midi + scarto <= hi) for n in frammento):
+                    continue
+                scelto = (p, scarto, priorita)
+                turno = (turno + k + 1) % len(candidati)
+                break
+            if scelto:
+                break
+        if scelto is None:
+            continue
+        p, scarto, priorita = scelto
+        eventi = [Evento(inizio=n.inizio, durata=n.durata,
+                         altezze=[n.midi + scarto], letterale=True)
+                  for n in frammento]
+        if _sostituisci_span(p, eventi):
+            note_report.append(
+                f"[Incisi] {p.nome}, mis. {_numero_misura(misure, a)}: inciso "
+                f"dell'originale ripreso"
+                + ("" if priorita == "tace" else " al posto del riempimento")
+                + ".")
+    return note_report
+
+
+def _numero_misura(misure: List[Misura], t: float) -> str:
+    for m in misure:
+        if m.inizio - 1e-6 <= t < m.fine - 1e-6:
+            return "levare" if m.anacrusi else str(m.numero)
+    return "?"
+
+
+def _sostituisci_span(parte: Parte, eventi: List[Evento]) -> bool:
+    """Rimpiazza il contenuto della parte nell'intervallo coperto dagli eventi."""
+    if not eventi:
+        return False
+    a, b = eventi[0].inizio, eventi[-1].fine
+    rigo = next((e.rigo for e in parte.eventi
+                 if e.inizio < b - 1e-6 and e.fine > a + 1e-6), 1)
+    for nuovo in eventi:
+        nuovo.rigo = rigo
+    tenuti: List[Evento] = []
+    for e in parte.eventi:
+        if e.rigo != rigo or e.fine <= a + 1e-6 or e.inizio >= b - 1e-6:
+            tenuti.append(e)
+            continue
+        if e.inizio < a - 1e-6:
+            tenuti.append(Evento(inizio=e.inizio, durata=a - e.inizio,
+                                 altezze=list(e.altezze), rigo=rigo,
+                                 letterale=e.letterale))
+        if e.fine > b + 1e-6:
+            tenuti.append(Evento(inizio=b, durata=e.fine - b,
+                                 altezze=list(e.altezze), rigo=rigo,
+                                 letterale=e.letterale))
+    parte.eventi = sorted(tenuti + eventi, key=lambda e: (e.rigo, e.inizio))
+    return True
+
+
+def _tace_in(parte: Parte, a: float, b: float) -> bool:
+    return all(e.pausa for e in parte.eventi
+               if e.inizio < b - 1e-6 and e.fine > a + 1e-6)
+
+
+def _inserisci_blocco(parte: Parte, eventi: List[Evento]) -> bool:
+    """Sostituisce le pause di una parte con gli eventi indicati."""
+    if not eventi:
+        return False
+    a, b = eventi[0].inizio, eventi[-1].fine
+    risultato: List[Evento] = []
+    inserito = False
+    for e in parte.eventi:
+        if e.pausa and e.inizio < b - 1e-6 and e.fine > a + 1e-6:
+            if a - e.inizio > 1e-6:
+                risultato.append(Evento(inizio=e.inizio, durata=a - e.inizio,
+                                        altezze=[], rigo=e.rigo))
+            if not inserito:
+                for nuovo in eventi:
+                    nuovo.rigo = e.rigo
+                    risultato.append(nuovo)
+                inserito = True
+            if e.fine - b > 1e-6:
+                risultato.append(Evento(inizio=b, durata=e.fine - b,
+                                        altezze=[], rigo=e.rigo))
+        else:
+            risultato.append(e)
+    if inserito:
+        parte.eventi = sorted(risultato, key=lambda e: (e.rigo, e.inizio))
+    return inserito
 
 
 def _copertura(ev: List[Evento]) -> List[Tuple[float, float]]:

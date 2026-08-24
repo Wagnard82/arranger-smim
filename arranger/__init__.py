@@ -5,9 +5,12 @@ from .modello import (Accordo, Analisi, Configurazione, Evento, Misura, Nota,
 from .pipeline import Risultato, esegui
 from .strumenti import LIVELLI, ORDINE_PARTITURA, REGISTRO
 
-__version__ = "1.0.0"
+from .versione import NOVITA, VERSIONE
+
+__version__ = VERSIONE
 __all__ = [
     "Accordo", "Analisi", "Configurazione", "Evento", "Misura", "Nota",
     "Parte", "Partitura", "Spartito", "Risultato", "esegui",
-    "LIVELLI", "REGISTRO", "ORDINE_PARTITURA", "__version__",
+    "LIVELLI", "REGISTRO", "ORDINE_PARTITURA", "NOVITA", "VERSIONE",
+    "__version__",
 ]

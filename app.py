@@ -22,7 +22,9 @@ from arranger import Configurazione, esegui
 from arranger import ia
 from arranger.modello import nome_it
 from arranger.orchestratore import costruisci_parti
+from arranger.ingestione import stato_dipendenze_omr
 from arranger.strumenti import LIVELLI, ORDINE_PARTITURA, REGISTRO, livello, strumento
+from arranger.versione import DATA, NOVITA, PRECEDENTE, VERSIONE
 
 DESTINATARIO = "claudiobianchi82@gmail.com"
 
@@ -31,9 +33,21 @@ st.set_page_config(page_title="Arranger SMIM", page_icon="🎼", layout="wide")
 CARTELLA = os.path.join(tempfile.gettempdir(), "arranger_smim")
 os.makedirs(CARTELLA, exist_ok=True)
 
-st.title("🎼 Arranger SMIM")
+st.title(f"🎼 Arranger SMIM · v{VERSIONE}")
 st.caption("Da uno spartito per pianoforte a una partitura per orchestra "
            "scolastica, con controllo automatico dei limiti didattici.")
+
+PRINCIPALE, REGISTRO_MODIFICHE = st.columns([3, 1], gap="large")
+
+with REGISTRO_MODIFICHE:
+    st.markdown(f"### 🆕 Novita' della {VERSIONE}")
+    st.caption(f"rispetto alla {PRECEDENTE} · {DATA}")
+    for titolo, voci in NOVITA:
+        with st.expander(titolo, expanded=False):
+            for voce in voci:
+                st.markdown(f"- {voce}")
+    st.caption("Hai trovato qualcosa che non torna? Usa il modulo di feedback "
+               "in fondo alla pagina: indica il brano e la battuta.")
 
 
 # ==========================================================================
@@ -95,7 +109,14 @@ with st.sidebar:
     st.info(livello(liv).note)
 
     st.header("3 · Stile")
-    stile = st.selectbox("Stile di arrangiamento", ["Normale", "Cinematico", "Jazz"])
+    stili = ["Normale", "Cinematico", "Jazz"]
+    if ia.disponibile():
+        stili.append("Automatico")
+    stile = st.selectbox(
+        "Stile di arrangiamento", stili,
+        help=("'Automatico' fa scegliere stile e tipo di accompagnamento "
+              "al modello, che tiene conto anche di cio' che si sa del brano "
+              "originale. Richiede l'IA attiva."))
 
     st.header("4 · Chi porta la melodia")
     attive = {k: v for k, v in formazione.items() if v > 0}
@@ -113,6 +134,11 @@ with st.sidebar:
     st.header("5 · Opzioni")
     trasporto = st.slider("Trasporto (semitoni)", -12, 12, 0)
     genera_ly = st.checkbox("Genera anche il sorgente LilyPond (.ly)", value=False)
+    debug = st.checkbox(
+        "Modalita' confronto", value=False,
+        help=("Accoda in fondo alla partitura lo spartito originale, "
+              "non modificato: aprendo il file si legge l'arrangiamento "
+              "sopra e l'originale sotto, battuta per battuta."))
     usa_ia = st.checkbox("Usa l'IA per le scelte di orchestrazione",
                          value=False, disabled=not ia.disponibile())
     if not ia.disponibile():
@@ -122,163 +148,187 @@ with st.sidebar:
 # MODULO 1 - Ingestione (solo spartiti pianistici)
 # ==========================================================================
 
-st.subheader("Spartito di partenza")
-st.info(
-    "**Carica uno spartito per PIANOFORTE**: MusicXML (`.xml`, `.musicxml`, "
-    "`.mxl`) oppure MIDI (`.mid`). Il file deve contenere una riduzione "
-    "pianistica su due righi, chiave di violino e di basso, con melodia, "
-    "armonia e basso gia' scritti per pianoforte. Partiture gia' orchestrate, "
-    "parti staccate o file su un rigo solo danno risultati scadenti.")
+with PRINCIPALE:
+    st.subheader("Spartito di partenza")
+    st.info(
+        "**Carica uno spartito per PIANOFORTE**: MusicXML (`.xml`, `.musicxml`, "
+        "`.mxl`) oppure MIDI (`.mid`). Il file deve contenere una riduzione "
+        "pianistica su due righi, chiave di violino e di basso, con melodia, "
+        "armonia e basso gia' scritti per pianoforte. Partiture gia' orchestrate, "
+        "parti staccate o file su un rigo solo danno risultati scadenti.")
 
-col1, col2 = st.columns([2, 1])
-with col1:
-    caricato = st.file_uploader(
-        "Spartito pianistico (MusicXML o MIDI)",
-        type=["xml", "musicxml", "mxl", "mid", "midi"])
-with col2:
-    demo = st.checkbox("Prova con il brano dimostrativo",
-                       help="Inno alla Gioia, con anacrusi")
+    _omr = stato_dipendenze_omr()
+    _tipi = ["xml", "musicxml", "mxl", "mid", "midi"]
+    if any(_omr.values()):
+        _tipi.append("pdf")
 
-avvia = st.button("🎻 Genera arrangiamento", type="primary", use_container_width=True)
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        caricato = st.file_uploader(
+            "Spartito pianistico (MusicXML o MIDI)"
+            + (" o PDF" if any(_omr.values()) else ""), type=_tipi)
+        if not any(_omr.values()):
+            with st.expander("Ho solo un PDF: come faccio?"):
+                st.markdown(
+                    "Il riconoscimento ottico non e' attivo su questa istanza "
+                    "(richiede troppa memoria). Converti il PDF in MusicXML con "
+                    "uno di questi, poi carica il file ottenuto:\n\n"
+                    "- **MuseScore 4** (gratuito): *File > Importa PDF*;\n"
+                    "- **Audiveris** (gratuito, open source): il piu' accurato "
+                    "sulla musica stampata;\n"
+                    "- **PlayScore 2** o **Soundslice**: servizi online.\n\n"
+                    "Ricontrolla sempre il MusicXML prodotto: il riconoscimento "
+                    "ottico sbaglia spesso alterazioni, voci e legature, e gli "
+                    "errori si propagano all'arrangiamento.")
+    with col2:
+        demo = st.checkbox("Prova con il brano dimostrativo",
+                           help="Inno alla Gioia, con anacrusi")
 
-# ==========================================================================
-# Esecuzione
-# ==========================================================================
+    avvia = st.button("🎻 Genera arrangiamento", type="primary", use_container_width=True)
 
-if avvia:
-    if not any(formazione.values()):
-        st.error("Seleziona almeno uno strumento nella formazione.")
-        st.stop()
+    # ==========================================================================
+    # Esecuzione
+    # ==========================================================================
 
-    if demo:
-        from esempi import genera_esempi
-        sorgente = genera_esempi.inno_alla_gioia(
-            os.path.join(CARTELLA, "inno_alla_gioia.xml"))
-    elif caricato is not None:
-        sorgente = os.path.join(CARTELLA, caricato.name)
-        with open(sorgente, "wb") as f:
-            f.write(caricato.getbuffer())
-    else:
-        st.error("Carica un file oppure spunta il brano dimostrativo.")
-        st.stop()
-
-    cfg = Configurazione(formazione={k: v for k, v in formazione.items() if v > 0},
-                         livello=liv, stile=stile, trasporto=trasporto,
-                         strumenti_melodia=scelte_melodia,
-                         staffetta_melodia=staffetta, raddoppi_melodia=raddoppi,
-                         usa_ia=usa_ia)
-
-    with st.spinner("Analisi e arrangiamento in corso..."):
-        try:
-            st.session_state["risultato"] = esegui(
-                sorgente, cfg, cartella=CARTELLA, esporta_ly=genera_ly)
-        except Exception as e:
-            st.error(f"Non sono riuscito a elaborare il file: {e}")
-            with st.expander("Dettagli tecnici"):
-                st.code(traceback.format_exc())
+    if avvia:
+        if not any(formazione.values()):
+            st.error("Seleziona almeno uno strumento nella formazione.")
             st.stop()
 
-# ==========================================================================
-# Risultati
-# ==========================================================================
-
-r = st.session_state.get("risultato")
-if r:
-    st.success(f"Arrangiamento di **{r.master.titolo}** completato: "
-               f"{len(r.partitura.parti)} parti, {len(r.partitura.misure)} misure.")
-
-    t1, t2, t3, t4 = st.tabs(["📥 Download", "🔍 Analisi dello spartito",
-                              "🎻 Parti generate", "✅ Report dei filtri"])
-
-    with t1:
-        with open(r.percorso_xml, "rb") as f:
-            st.download_button("Scarica la partitura MusicXML", f.read(),
-                               file_name=os.path.basename(r.percorso_xml),
-                               mime="application/vnd.recordare.musicxml+xml",
-                               use_container_width=True)
-        if r.percorso_midi and os.path.exists(r.percorso_midi):
-            with open(r.percorso_midi, "rb") as f:
-                st.download_button("Scarica il MIDI di anteprima", f.read(),
-                                   file_name=os.path.basename(r.percorso_midi),
-                                   mime="audio/midi", use_container_width=True)
-        if r.percorso_ly and os.path.exists(r.percorso_ly):
-            with open(r.percorso_ly, "rb") as f:
-                st.download_button("Scarica il sorgente LilyPond (.ly)", f.read(),
-                                   file_name=os.path.basename(r.percorso_ly),
-                                   mime="text/plain", use_container_width=True)
-        st.caption("Il MusicXML si apre in MuseScore, Dorico, Sibelius e Finale: "
-                   "nomi degli strumenti, graffa del pianoforte, armature "
-                   "trasposte, dinamiche e articolazioni sono gia' impostate.")
-
-    with t2:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Anacrusi", f"{r.master.anacrusi:g} quarti"
-                  if r.master.anacrusi else "assente")
-        c2.metric("Note lette", len(r.master.note))
-        c3.metric("Accordi dedotti", len(r.analisi.armonia))
-        st.markdown("**Melodia rilevata**")
-        st.code(" ".join(nome_it(n.midi) for n in r.analisi.melodia[:80]) or "-")
-        st.markdown("**Griglia armonica**")
-        st.code(" | ".join(a.sigla() for a in r.analisi.armonia[:80]) or "-")
-
-    with t3:
-        for p in r.partitura.parti:
-            suonate = [e for e in p.eventi if not e.pausa]
-            with st.expander(f"{p.nome} — ruolo: {p.ruolo} — {len(suonate)} eventi"):
-                if not suonate:
-                    st.write("Parte in pausa.")
-                    continue
-                estremi = (min(min(e.altezze) for e in suonate),
-                           max(max(e.altezze) for e in suonate))
-                st.write(f"Ambito impiegato: {nome_it(estremi[0])} – "
-                         f"{nome_it(estremi[1])}"
-                         + (f" · trasposizione: {p.trasposizione:+d} semitoni"
-                            if p.trasposizione else ""))
-                st.code(" ".join(
-                    ("/".join(nome_it(a) for a in e.altezze) if e.altezze else "·")
-                    for e in p.eventi[:64]))
-
-    with t4:
-        if r.relazione:
-            st.markdown("**Relazione per il docente**")
-            st.write(r.relazione)
-        if r.report:
-            st.warning(f"{len(r.report)} interventi automatici del validatore:")
-            for riga in r.report[:200]:
-                st.write("- " + riga)
-            if len(r.report) > 200:
-                st.caption(f"...e altri {len(r.report) - 200}.")
+        if demo:
+            from esempi import genera_esempi
+            sorgente = genera_esempi.inno_alla_gioia(
+                os.path.join(CARTELLA, "inno_alla_gioia.xml"))
+        elif caricato is not None:
+            sorgente = os.path.join(CARTELLA, caricato.name)
+            with open(sorgente, "wb") as f:
+                f.write(caricato.getbuffer())
         else:
-            st.success("Nessun intervento necessario: tutte le parti rispettano "
-                       "i vincoli del livello selezionato.")
+            st.error("Carica un file oppure spunta il brano dimostrativo.")
+            st.stop()
 
-# ==========================================================================
-# Feedback
-# ==========================================================================
+        cfg = Configurazione(formazione={k: v for k, v in formazione.items() if v > 0},
+                             livello=liv, stile=stile, trasporto=trasporto,
+                             strumenti_melodia=scelte_melodia,
+                             staffetta_melodia=staffetta, raddoppi_melodia=raddoppi,
+                             debug_originale=debug, usa_ia=usa_ia)
 
-st.divider()
-st.subheader("💬 Dimmi come è andata")
-st.caption("Il progetto è in prova: ogni segnalazione aiuta a migliorarlo. "
-           "Se hai trovato un errore, indica il brano e la battuta.")
+        with st.spinner("Analisi e arrangiamento in corso..."):
+            try:
+                st.session_state["risultato"] = esegui(
+                    sorgente, cfg, cartella=CARTELLA, esporta_ly=genera_ly)
+            except Exception as e:
+                st.error(f"Non sono riuscito a elaborare il file: {e}")
+                with st.expander("Dettagli tecnici"):
+                    st.code(traceback.format_exc())
+                st.stop()
 
-with st.form("feedback", clear_on_submit=True):
-    c1, c2 = st.columns(2)
-    nome_utente = c1.text_input("Nome (facoltativo)")
-    email_utente = c2.text_input("La tua email (se vuoi una risposta)")
-    categoria = st.selectbox(
-        "Tipo di segnalazione",
-        ["Errore musicale", "Errore tecnico", "Suggerimento", "Altro"])
-    messaggio = st.text_area("Messaggio", height=140,
-                             placeholder="Es.: nella battuta 12 il clarinetto...")
-    inviato = st.form_submit_button("Invia", type="primary")
+    # ==========================================================================
+    # Risultati
+    # ==========================================================================
 
-if inviato:
-    if not messaggio.strip():
-        st.warning("Scrivi qualcosa nel messaggio prima di inviare.")
-    elif invia_feedback(nome_utente, email_utente, categoria, messaggio):
-        st.success("Grazie! Il messaggio è stato inviato.")
-    else:
-        st.warning("L'invio automatico non è disponibile in questo momento.")
-        st.markdown(
-            f"[Apri il messaggio nel tuo programma di posta]"
-            f"({link_mailto(nome_utente, email_utente, categoria, messaggio)})")
+    r = st.session_state.get("risultato")
+    if r:
+        st.success(f"Arrangiamento di **{r.master.titolo}** completato: "
+                   f"{len(r.partitura.parti)} parti, {len(r.partitura.misure)} misure.")
+
+        t1, t2, t3, t4 = st.tabs(["📥 Download", "🔍 Analisi dello spartito",
+                                  "🎻 Parti generate", "✅ Report dei filtri"])
+
+        with t1:
+            with open(r.percorso_xml, "rb") as f:
+                st.download_button("Scarica la partitura MusicXML", f.read(),
+                                   file_name=os.path.basename(r.percorso_xml),
+                                   mime="application/vnd.recordare.musicxml+xml",
+                                   use_container_width=True)
+            if r.percorso_midi and os.path.exists(r.percorso_midi):
+                with open(r.percorso_midi, "rb") as f:
+                    st.download_button("Scarica il MIDI di anteprima", f.read(),
+                                       file_name=os.path.basename(r.percorso_midi),
+                                       mime="audio/midi", use_container_width=True)
+            if r.percorso_ly and os.path.exists(r.percorso_ly):
+                with open(r.percorso_ly, "rb") as f:
+                    st.download_button("Scarica il sorgente LilyPond (.ly)", f.read(),
+                                       file_name=os.path.basename(r.percorso_ly),
+                                       mime="text/plain", use_container_width=True)
+            st.caption("Il MusicXML si apre in MuseScore, Dorico, Sibelius e Finale: "
+                       "nomi degli strumenti, graffa del pianoforte, armature "
+                       "trasposte, dinamiche e articolazioni sono gia' impostate.")
+
+        with t2:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Anacrusi", f"{r.master.anacrusi:g} quarti"
+                      if r.master.anacrusi else "assente")
+            c2.metric("Note lette", len(r.master.note))
+            c3.metric("Accordi dedotti", len(r.analisi.armonia))
+            st.markdown("**Melodia rilevata**")
+            st.code(" ".join(nome_it(n.midi) for n in r.analisi.melodia[:80]) or "-")
+            st.markdown("**Griglia armonica**")
+            st.code(" | ".join(a.sigla() for a in r.analisi.armonia[:80]) or "-")
+
+        with t3:
+            for p in r.partitura.parti:
+                suonate = [e for e in p.eventi if not e.pausa]
+                with st.expander(f"{p.nome} — ruolo: {p.ruolo} — {len(suonate)} eventi"):
+                    if not suonate:
+                        st.write("Parte in pausa.")
+                        continue
+                    estremi = (min(min(e.altezze) for e in suonate),
+                               max(max(e.altezze) for e in suonate))
+                    st.write(f"Ambito impiegato: {nome_it(estremi[0])} – "
+                             f"{nome_it(estremi[1])}"
+                             + (f" · trasposizione: {p.trasposizione:+d} semitoni"
+                                if p.trasposizione else ""))
+                    st.code(" ".join(
+                        ("/".join(nome_it(a) for a in e.altezze) if e.altezze else "·")
+                        for e in p.eventi[:64]))
+
+        with t4:
+            for n in r.note_ia:
+                st.info(n)
+            if r.riferimenti:
+                with st.expander("Informazioni sul brano originale (ricerca IA)"):
+                    st.write(r.riferimenti)
+            if r.relazione:
+                st.markdown("**Relazione per il docente**")
+                st.write(r.relazione)
+            if r.report:
+                st.warning(f"{len(r.report)} interventi automatici del validatore:")
+                for riga in r.report[:200]:
+                    st.write("- " + riga)
+                if len(r.report) > 200:
+                    st.caption(f"...e altri {len(r.report) - 200}.")
+            else:
+                st.success("Nessun intervento necessario: tutte le parti rispettano "
+                           "i vincoli del livello selezionato.")
+
+    # ==========================================================================
+    # Feedback
+    # ==========================================================================
+
+    st.divider()
+    st.subheader("💬 Dimmi come è andata")
+    st.caption("Il progetto è in prova: ogni segnalazione aiuta a migliorarlo. "
+               "Se hai trovato un errore, indica il brano e la battuta.")
+
+    with st.form("feedback", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        nome_utente = c1.text_input("Nome (facoltativo)")
+        email_utente = c2.text_input("La tua email (se vuoi una risposta)")
+        categoria = st.selectbox(
+            "Tipo di segnalazione",
+            ["Errore musicale", "Errore tecnico", "Suggerimento", "Altro"])
+        messaggio = st.text_area("Messaggio", height=140,
+                                 placeholder="Es.: nella battuta 12 il clarinetto...")
+        inviato = st.form_submit_button("Invia", type="primary")
+
+    if inviato:
+        if not messaggio.strip():
+            st.warning("Scrivi qualcosa nel messaggio prima di inviare.")
+        elif invia_feedback(nome_utente, email_utente, categoria, messaggio):
+            st.success("Grazie! Il messaggio è stato inviato.")
+        else:
+            st.warning("L'invio automatico non è disponibile in questo momento.")
+            st.markdown(
+                f"[Apri il messaggio nel tuo programma di posta]"
+                f"({link_mailto(nome_utente, email_utente, categoria, messaggio)})")

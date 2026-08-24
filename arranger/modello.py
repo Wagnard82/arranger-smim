@@ -179,6 +179,13 @@ class Analisi:
     melodia: List[Nota] = field(default_factory=list)
     armonia: List[Accordo] = field(default_factory=list)
     basso: List[Nota] = field(default_factory=list)
+    voci_interne: List[List[Nota]] = field(default_factory=list)
+    # seconde/terze voci e contrappunti estratti dall'originale
+    frammenti: List[List[Nota]] = field(default_factory=list)
+    # incisi, scale, riempimenti: materiale melodico breve rimasto inutilizzato
+    figurazione: List[Nota] = field(default_factory=list)
+    # tutto cio' che non e' melodia: l'accompagnamento come scritto
+    # nell'originale, con i suoi attacchi e le sue durate
     groove: List[float] = field(default_factory=list)   # posizioni d'attacco tipiche (in quarti dalla stanghetta)
     suddivisione: float = 0.5                            # 1.0=semiminime, 0.5=crome, 0.25=semicrome
     frasi: List[Tuple[float, float]] = field(default_factory=list)  # (inizio, fine) in quarti
@@ -204,6 +211,7 @@ class Evento:
     legata_dopo: bool = False
     testo: Optional[str] = None
     rigo: int = 1                 # per strumenti a due righi (pianoforte)
+    letterale: bool = False       # copia fedele dell'originale: non levigare
 
     @property
     def fine(self) -> float:
@@ -248,7 +256,7 @@ class Partitura:
     parti: List[Parte] = field(default_factory=list)
     misure: List[Misura] = field(default_factory=list)
     bpm: float = 90.0
-    stile: str = "Normale"
+    stile: str = "Normale"           # Normale | Cinematico | Jazz | Automatico
     livello: str = "1a Media"
     swing: bool = False
     armonia: List["Accordo"] = field(default_factory=list)
@@ -270,13 +278,14 @@ class Partitura:
 class Configurazione:
     formazione: Dict[str, int] = field(default_factory=dict)  # {"flauto": 2, "violino": 2, ...}
     livello: str = "1a Media"
-    stile: str = "Normale"
+    stile: str = "Normale"           # Normale | Cinematico | Jazz | Automatico
     tonalita_originale: bool = True
     trasporto: int = 0                 # semitoni di trasporto globale
     strumenti_melodia: List[str] = field(default_factory=list)
     # id delle parti abilitate a portare la melodia (vuoto = decide il motore)
     staffetta_melodia: bool = True     # la melodia passa fra piu' strumenti
     raddoppi_melodia: bool = True
+    debug_originale: bool = False   # accoda lo spartito originale alla partitura
     usa_ia: bool = False
     modello_ia: str = "claude-sonnet-4-6"
 

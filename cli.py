@@ -34,13 +34,17 @@ def organico(testo: str) -> dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Arranger SMIM")
-    ap.add_argument("sorgente", help="file MusicXML/MIDI/audio oppure link YouTube")
+    ap.add_argument("sorgente",
+                    help="spartito pianistico: MusicXML, MIDI o PDF (con OMR)")
     ap.add_argument("--organico", type=organico, required=True,
                     help="es. flauto=2,violino=2,violoncello=1,chitarra=1")
     ap.add_argument("--livello", choices=list(LIVELLI), default="1a Media")
-    ap.add_argument("--stile", choices=["Normale", "Cinematico", "Jazz"], default="Normale")
+    ap.add_argument("--stile", default="Normale",
+                    choices=["Normale", "Cinematico", "Jazz", "Automatico"])
     ap.add_argument("--trasporto", type=int, default=0)
     ap.add_argument("--no-staffetta", action="store_true")
+    ap.add_argument("--confronto", action="store_true",
+                    help="accoda lo spartito originale in fondo alla partitura")
     ap.add_argument("--ia", action="store_true", help="usa l'API Anthropic")
     ap.add_argument("--lilypond", action="store_true",
                     help="genera anche il sorgente .ly")
@@ -51,7 +55,7 @@ def main(argv=None) -> int:
 
     cfg = Configurazione(formazione=a.organico, livello=a.livello, stile=a.stile,
                          trasporto=a.trasporto, staffetta_melodia=not a.no_staffetta,
-                         usa_ia=a.ia)
+                         debug_originale=a.confronto, usa_ia=a.ia)
     r = esegui(a.sorgente, cfg, cartella=a.output,
                esporta_ly=a.lilypond or a.pdf, incidi_pdf=a.pdf)
 

@@ -329,6 +329,132 @@ def con_forcelle(percorso):
     return percorso
 
 
+def sinistra_arpeggiata(percorso):
+    """
+    Mano sinistra con un arpeggio continuo in crome (Re2-La2-Re3-Fa#3) e
+    melodia alla destra. Verifica che l'arpeggio venga conservato invece di
+    essere schiacciato in una nota lunga.
+    """
+    melodia = [[(74, 2), (76, 1), (74, 1)],
+               [(71, 2), (69, 2)],
+               [(67, 1), (69, 1), (71, 1), (74, 1)],
+               [(74, 4)]]
+    arpeggi = [[38, 45, 50, 54], [43, 50, 55, 59],
+               [40, 47, 52, 56], [38, 45, 50, 54]]
+    righe = _intestazione("Sinistra arpeggiata")
+    for i, battuta in enumerate(melodia):
+        righe.append(f'    <measure number="{i + 1}">')
+        if i == 0:
+            righe += _attributi()
+        for midi, q in battuta:
+            righe += _nota(midi, q, 1, 1)
+        righe.append(f"      <backup><duration>{int(4 * DIV)}</duration></backup>")
+        figura = arpeggi[i] + list(reversed(arpeggi[i]))
+        for midi in figura:
+            righe += _nota(midi, 0.5, 2, 2)
+        righe.append("    </measure>")
+    righe += ["  </part>", "</score-partwise>"]
+    _scrivi(percorso, righe)
+    return percorso
+
+
+def con_seconda_voce(percorso):
+    """
+    Melodia alla voce superiore e una SECONDA VOCE reale (contrappunto in moto
+    contrario) sotto, piu' un basso. Verifica che la seconda voce venga
+    riconosciuta e affidata a uno strumento invece di essere ridotta a
+    riempimento armonico.
+    """
+    soprano = [[(72, 1), (74, 1), (76, 1), (77, 1)],
+               [(79, 2), (77, 2)],
+               [(76, 1), (74, 1), (72, 1), (71, 1)],
+               [(72, 4)]]
+    contralto = [[(64, 1), (62, 1), (60, 1), (59, 1)],
+                 [(60, 2), (62, 2)],
+                 [(64, 1), (65, 1), (67, 1), (67, 1)],
+                 [(64, 4)]]
+    bassi = [48, 43, 48, 48]
+    righe = _intestazione("Con seconda voce")
+    for i in range(4):
+        righe.append(f'    <measure number="{i + 1}">')
+        if i == 0:
+            righe += _attributi()
+        for midi, q in soprano[i]:
+            righe += _nota(midi, q, 1, 1)
+        righe.append(f"      <backup><duration>{int(4 * DIV)}</duration></backup>")
+        for midi, q in contralto[i]:
+            righe += _nota(midi, q, 1, 2)
+        righe.append(f"      <backup><duration>{int(4 * DIV)}</duration></backup>")
+        righe += _nota(bassi[i], 4, 2, 3)
+        righe.append("    </measure>")
+    righe += ["  </part>", "</score-partwise>"]
+    _scrivi(percorso, righe)
+    return percorso
+
+
+def con_inciso(percorso):
+    """
+    Melodia in valori lunghi e, alla battuta 3, una SCALA di semicrome che non
+    fa parte ne' della melodia ne' dell'accompagnamento: e' l'inciso che un
+    arrangiatore affiderebbe a uno strumento libero.
+    """
+    righe = _intestazione("Con inciso")
+    battute = [
+        ([(72, 2), (74, 2)], None),
+        ([(76, 4)], None),
+        ([(76, 4)], [60, 62, 64, 65, 67, 69, 71, 72]),   # scala in crome
+        ([(74, 4)], None),
+    ]
+    bassi = [48, 43, 48, 48]
+    for i, (melodia, inciso) in enumerate(battute):
+        righe.append(f'    <measure number="{i + 1}">')
+        if i == 0:
+            righe += _attributi()
+        for midi, q in melodia:
+            righe += _nota(midi, q, 1, 1)
+        if inciso:
+            righe.append(f"      <backup><duration>{int(4 * DIV)}</duration></backup>")
+            for midi in inciso:
+                righe += _nota(midi, 0.5, 1, 2)
+        righe.append(f"      <backup><duration>{int(4 * DIV)}</duration></backup>")
+        righe += _nota(bassi[i], 4, 2, 3)
+        righe.append("    </measure>")
+    righe += ["  </part>", "</score-partwise>"]
+    _scrivi(percorso, righe)
+    return percorso
+
+
+def basso_ritmico(percorso):
+    """
+    Mano sinistra con una figurazione ritmica precisa (basso puntato + croma),
+    mano destra con la melodia. Serve a verificare che l'arrangiatore usi il
+    RITMO del basso originale invece di inventarsi quarti regolari, e che la
+    melodia non venga ribaltata d'ottava quando scende.
+    """
+    melodia = [[(74, 1), (72, 0.5), (71, 0.5), (69, 1), (67, 1)],
+               [(69, 1.5), (69, 0.5), (66, 0.5), (69, 0.5), (64, 1)],
+               [(62, 1), (64, 0.5), (66, 0.5), (67, 1), (69, 1)],
+               [(74, 2), (69, 2)]]
+    # basso: nota puntata + croma su ogni meta' battuta
+    bassi = [38, 45, 43, 38]
+    righe = _intestazione("Basso ritmico")
+    for i, battuta in enumerate(melodia):
+        righe.append(f'    <measure number="{i + 1}">')
+        if i == 0:
+            righe += _attributi()
+        for midi, q in battuta:
+            righe += _nota(midi, q, 1, 1)
+        righe.append(f"      <backup><duration>{int(4 * DIV)}</duration></backup>")
+        b = bassi[i]
+        for meta in range(2):
+            righe += _nota(b, 1.5, 2, 2)
+            righe += _nota(b + 12, 0.5, 2, 2)
+        righe.append("    </measure>")
+    righe += ["  </part>", "</score-partwise>"]
+    _scrivi(percorso, righe)
+    return percorso
+
+
 if __name__ == "__main__":
     qui = os.path.dirname(os.path.abspath(__file__))
     print(inno_alla_gioia(os.path.join(qui, "inno_alla_gioia.xml")))
@@ -338,3 +464,7 @@ if __name__ == "__main__":
     print(pause_finali_omesse(os.path.join(qui, "pause_omesse.xml")))
     print(scale_ampie(os.path.join(qui, "scale_ampie.xml")))
     print(con_forcelle(os.path.join(qui, "forcelle.xml")))
+    print(basso_ritmico(os.path.join(qui, "basso_ritmico.xml")))
+    print(sinistra_arpeggiata(os.path.join(qui, "sinistra_arpeggiata.xml")))
+    print(con_seconda_voce(os.path.join(qui, "seconda_voce.xml")))
+    print(con_inciso(os.path.join(qui, "inciso.xml")))

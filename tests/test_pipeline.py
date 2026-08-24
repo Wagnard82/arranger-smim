@@ -42,7 +42,11 @@ def prepara():
     e = genera_esempi.melodia_che_migra(os.path.join(d, "melodia_che_migra.xml"))
     f = genera_esempi.pause_finali_omesse(os.path.join(d, "pause_omesse.xml"))
     g = genera_esempi.scale_ampie(os.path.join(d, "scale_ampie.xml"))
-    return a, b, c, e, f, g
+    h = genera_esempi.basso_ritmico(os.path.join(d, "basso_ritmico.xml"))
+    i = genera_esempi.sinistra_arpeggiata(os.path.join(d, "sinistra_arpeggiata.xml"))
+    j = genera_esempi.con_seconda_voce(os.path.join(d, "seconda_voce.xml"))
+    k = genera_esempi.con_inciso(os.path.join(d, "inciso.xml"))
+    return a, b, c, e, f, g, h, i, j, k
 
 
 # --------------------------------------------------------------------------
@@ -454,6 +458,306 @@ def test_mani_non_si_scontrano(inno):
         verifica(scontri == 0, f"stile {stile}: {scontri} collisioni fra le mani")
 
 
+def test_modalita_confronto(inno):
+    """
+    La modalita' confronto accoda lo spartito originale in fondo alla
+    partitura, NON filtrato: deve restare identico nota per nota.
+    """
+    cfg = Configurazione(formazione={"flauto": 1, "violoncello": 1},
+                         livello="1a Media", stile="Normale",
+                         debug_originale=True)
+    r = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"), nome_base="confronto")
+    originale = r.partitura.parte("originale")
+    verifica(originale is not None, "parte di confronto non aggiunta")
+    if originale is None:
+        return
+    verifica(originale is r.partitura.parti[-1],
+             "la parte di confronto non e' in fondo alla partitura")
+    verifica(originale.righi == 2, "la parte di confronto non ha i due righi")
+
+    suonate = sorted(a for e in originale.eventi if not e.pausa for a in e.altezze)
+    attese = sorted(n.midi for n in r.master.note)
+    verifica(suonate == attese,
+             f"lo spartito di confronto e' stato alterato: "
+             f"{len(suonate)} note contro {len(attese)}")
+
+    # la metrica dell'export deve reggere anche con la parte in piu'
+    attese_dur = {(m.numero if not m.anacrusi else 0):
+                  round(m.durata * esportatore.DIV) for m in r.partitura.misure}
+    radice = ET.parse(r.percorso_xml).getroot()
+    errori = 0
+    for parte in radice.findall("part"):
+        for mis in parte.findall("measure"):
+            n = int(mis.get("number"))
+            per_voce = {}
+            for nota in mis.findall("note"):
+                if nota.find("chord") is not None:
+                    continue
+                v = nota.findtext("voice") or "1"
+                per_voce[v] = per_voce.get(v, 0) + int(nota.findtext("duration") or 0)
+            errori += sum(1 for v, s in per_voce.items() if s != attese_dur.get(n))
+    verifica(errori == 0, f"{errori} misure sbagliate in modalita' confronto")
+
+
+def test_basso_ritmico(percorso):
+    """
+    Il basso dell'originale, con il suo ritmo, deve arrivare allo strumento
+    piu' grave: niente pattern di quarti inventati quando la mano sinistra ha
+    gia' una figurazione riconoscibile.
+    """
+    sp = ingestione.da_musicxml(percorso)
+    an = analizzatore.analizza(sp)
+    attacchi = sorted(round(n.inizio % 4, 2) for n in an.basso if n.inizio < 8)
+    verifica(1.5 in attacchi and 3.5 in attacchi,
+             f"il ritmo puntato del basso non e' stato riconosciuto: {attacchi}")
+    verifica(all(n.midi <= 62 for n in an.basso),
+             "la linea di basso comprende note che non sono basso")
+
+    for organico, atteso in (({"flauto": 1, "violoncello": 1}, "violoncello"),
+                             ({"flauto": 1, "chitarra": 1}, "chitarra"),
+                             ({"flauto": 1, "pianoforte": 1}, "pianoforte")):
+        cfg = Configurazione(formazione=organico, livello="3a Media",
+                             stile="Normale")
+        r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+                   nome_base=f"basso_{atteso}")
+        bassi = [p for p in r.partitura.parti if p.ruolo == "basso"]
+        verifica(bassi and bassi[0].strumento == atteso,
+                 f"con organico {list(organico)} il basso doveva andare a "
+                 f"{atteso}, invece a {[p.strumento for p in bassi] or 'nessuno'}")
+        if bassi:
+            attacchi_parte = {round(e.inizio % 4, 2)
+                              for e in bassi[0].eventi if not e.pausa}
+            verifica(1.5 in attacchi_parte,
+                     f"{atteso}: il ritmo del basso originale non e' stato usato")
+
+
+def test_melodia_non_ribaltata(percorso):
+    """La melodia entro l'ambito dello strumento non deve essere spostata."""
+    cfg = Configurazione(formazione={"flauto": 1, "violoncello": 1},
+                         livello="3a Media", stile="Normale")
+    r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+               nome_base="mel_ottava")
+    flauto = next(p for p in r.partitura.parti if p.strumento == "flauto")
+    suonate = [max(e.altezze) for e in flauto.eventi if not e.pausa]
+    originali = [n.midi for n in r.analisi.melodia]
+    verifica(suonate[:len(originali)] == originali[:len(suonate)],
+             f"melodia alterata: {suonate[:6]} contro {originali[:6]}")
+
+
+def test_figurazione_conservata(percorso):
+    """
+    Se la mano sinistra dell'originale ha un arpeggio o una figura ritmica,
+    dalla 2a media in su deve sopravvivere nell'arrangiamento: il pianoforte
+    non puo' ridurla a una nota lunga per battuta.
+    """
+    sp = ingestione.da_musicxml(percorso)
+    an = analizzatore.analizza(sp)
+    verifica(analizzatore.densita_figurazione(an.figurazione, sp.misure) >= 4,
+             "figurazione dell'accompagnamento non riconosciuta")
+
+    attesa = [38, 45, 50, 54, 54, 50, 45, 38]
+    for nome_livello in ("2a Media", "3a Media"):
+        cfg = Configurazione(formazione={"flauto": 1, "pianoforte": 1,
+                                         "violoncello": 1},
+                             livello=nome_livello, stile="Normale")
+        r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+                   nome_base=f"figura_{nome_livello[:2]}")
+        pf = next(p for p in r.partitura.parti if p.strumento == "pianoforte")
+        sinistra = [e for e in pf.eventi if e.rigo == 2 and not e.pausa]
+        verifica(len(sinistra) >= 8,
+                 f"{nome_livello}: arpeggio appiattito ({len(sinistra)} eventi "
+                 f"nella mano sinistra)")
+        prima_battuta = [e.altezze[0] for e in sinistra if e.inizio < 4.0]
+        verifica(prima_battuta == attesa,
+                 f"{nome_livello}: arpeggio alterato -> {prima_battuta}")
+
+    # in 1a media si semplifica, ed e' corretto cosi'
+    cfg = Configurazione(formazione={"flauto": 1, "pianoforte": 1},
+                         livello="1a Media", stile="Normale")
+    r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+               nome_base="figura_1a")
+    pf = next(p for p in r.partitura.parti if p.strumento == "pianoforte")
+    brevi = [e for e in pf.eventi if not e.pausa and e.durata < 1.0]
+    verifica(not brevi, f"1a Media: {len(brevi)} valori troppo brevi nel pianoforte")
+
+
+def test_seconda_voce(percorso, inno):
+    """
+    Una vera seconda voce va riconosciuta e affidata a uno strumento cosi'
+    com'e'; il riempimento armonico (due note alternate, arpeggi di
+    accompagnamento) non deve invece essere scambiato per contrappunto.
+    """
+    sp = ingestione.da_musicxml(percorso)
+    an = analizzatore.analizza(sp)
+    verifica(len(an.voci_interne) >= 1, "seconda voce non riconosciuta")
+    if an.voci_interne:
+        attesa = [64, 62, 60, 59, 60, 62, 64, 65, 67, 67, 64]
+        verifica([n.midi for n in an.voci_interne[0]] == attesa,
+                 f"seconda voce alterata: {[n.midi for n in an.voci_interne[0]]}")
+
+    cfg = Configurazione(formazione={"flauto": 1, "clarinetto": 1,
+                                     "violoncello": 1},
+                         livello="3a Media", stile="Normale")
+    r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+               nome_base="seconda")
+    clar = next(p for p in r.partitura.parti if p.strumento == "clarinetto")
+    suonate = [max(e.altezze) for e in clar.eventi if not e.pausa]
+    voce = [n.midi for n in r.analisi.voci_interne[0]]
+    scarti = {a - b for a, b in zip(suonate, voce)}
+    verifica(len(suonate) == len(voce) and len(scarti) == 1,
+             f"la seconda voce non e' stata riportata intatta: {suonate}")
+
+    # controprova: l'accompagnamento a blocchi non e' contrappunto
+    sp2 = ingestione.da_musicxml(inno)
+    an2 = analizzatore.analizza(sp2)
+    verifica(not an2.voci_interne,
+             f"riempimento armonico scambiato per voce interna: "
+             f"{[[n.midi for n in v[:6]] for v in an2.voci_interne]}")
+
+
+def test_inciso_utilizzato(percorso):
+    """
+    Un inciso dell'originale (qui una scala) non deve restare inutilizzato:
+    dalla 2a media in su va affidato a uno strumento, tale e quale.
+    """
+    scala = [60, 62, 64, 65, 67, 69, 71, 72]
+    cfg = Configurazione(formazione={"flauto": 1, "clarinetto": 1,
+                                     "violoncello": 1},
+                         livello="3a Media", stile="Normale")
+    r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+               nome_base="inciso")
+    trovata = False
+    for p in r.partitura.parti:
+        suonate = [e.altezze[0] for e in p.eventi
+                   if not e.pausa and len(e.altezze) == 1 and 8.0 <= e.inizio < 12.0]
+        if not suonate:
+            continue
+        scarti = {a - b for a, b in zip(suonate, scala)}
+        if len(suonate) == len(scala) and len(scarti) == 1:
+            trovata = True
+    verifica(trovata, "la scala dell'originale non e' finita in nessuna parte")
+
+    # in 1a media si semplifica: la scala in crome non e' ancora alla portata
+    cfg1 = Configurazione(formazione={"flauto": 1, "clarinetto": 1},
+                          livello="1a Media", stile="Normale")
+    r1 = esegui(percorso, cfg1, cartella=os.path.join(QUI, "_out"),
+                nome_base="inciso_1a")
+    brevi = [e for p in r1.partitura.parti for e in p.eventi
+             if not e.pausa and e.durata < 1.0 and p.ruolo != "melodia"]
+    verifica(not brevi, f"1a Media: {len(brevi)} valori troppo brevi")
+
+
+def test_materiale_non_sprecato(seconda, inciso):
+    """
+    Ogni voce interna e ogni inciso riconosciuti devono comparire in una
+    parte, trasposti al massimo d'ottava: il materiale dell'originale non si
+    butta via.
+    """
+    for percorso in (seconda, inciso):
+        cfg = Configurazione(formazione={"flauto": 1, "clarinetto": 1,
+                                         "sax": 1, "violoncello": 1},
+                             livello="3a Media", stile="Normale")
+        r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+                   nome_base="materiale_" + os.path.basename(percorso)[:6])
+        materiale = r.analisi.voci_interne + r.analisi.frammenti
+        verifica(materiale,
+                 f"{os.path.basename(percorso)}: nessun materiale secondario")
+        for segmento in materiale:
+            atteso = [n.midi for n in segmento]
+            a, b = segmento[0].inizio, segmento[-1].fine
+            trovato = False
+            for p in r.partitura.parti:
+                suonate = [e.altezze[0] for e in p.eventi
+                           if not e.pausa and len(e.altezze) == 1
+                           and a - 1e-6 <= e.inizio < b - 1e-6]
+                if len(suonate) != len(atteso):
+                    continue
+                scarti = {x - y for x, y in zip(suonate, atteso)}
+                if len(scarti) == 1 and abs(scarti.pop()) % 12 == 0:
+                    trovato = True
+                    break
+            verifica(trovato,
+                     f"{os.path.basename(percorso)}: materiale da {a:g} a {b:g} "
+                     f"non usato da nessuno")
+
+
+def test_accompagnamento_non_martellato(percorso):
+    """La chitarra non deve ribattere l'accordo su ogni attacco della
+    figurazione: al massimo un colpo per movimento."""
+    cfg = Configurazione(formazione={"flauto": 1, "chitarra": 1,
+                                     "violoncello": 1},
+                         livello="3a Media", stile="Normale")
+    r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+               nome_base="chitarra_ritmo")
+    chit = next(p for p in r.partitura.parti if p.strumento == "chitarra")
+    eccessi = 0
+    for m in r.partitura.misure:
+        attacchi = [e.inizio for e in chit.eventi
+                    if not e.pausa and m.inizio - 1e-6 <= e.inizio < m.fine - 1e-6]
+        movimenti = max(1, int(round(m.durata / m.unita_movimento)))
+        if len(attacchi) > movimenti + 1:
+            eccessi += 1
+    verifica(eccessi == 0, f"{eccessi} misure con la chitarra martellata")
+    doppie = [e for e in chit.eventi
+              if len(e.altezze) != len(set(e.altezze))]
+    verifica(not doppie, "accordi di chitarra con note ripetute")
+
+
+def test_solista_debole(inno):
+    """
+    Con la melodia alla chitarra l'accompagnamento va diradato: niente
+    raddoppi della melodia, accordi a due note, dinamica piu' bassa.
+    """
+    cfg = Configurazione(
+        formazione={"chitarra": 1, "flauto": 1, "pianoforte": 1,
+                    "violoncello": 1, "percussioni": 1},
+        livello="3a Media", stile="Normale", strumenti_melodia=["chitarra1"])
+    r = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"), nome_base="solista")
+    verifica(any(x.startswith("[Solista]") for x in r.report),
+             "l'alleggerimento per il solista debole non e' stato applicato")
+
+    chit = next(p for p in r.partitura.parti if p.strumento == "chitarra")
+    tratti = {round(e.inizio, 3) for e in chit.eventi if not e.pausa}
+    spessi, forti, raddoppi = 0, 0, 0
+    melodia = {round(n.inizio, 3): n.midi for n in r.analisi.melodia}
+    for p in r.partitura.parti:
+        if p is chit:
+            continue
+        for e in p.eventi:
+            if e.pausa or round(e.inizio, 3) not in tratti:
+                continue
+            if len(e.altezze) > 2:
+                spessi += 1
+            if e.dinamica not in (None, "p", "pp"):
+                forti += 1
+            alt = melodia.get(round(e.inizio, 3))
+            if (alt is not None and len(e.altezze) == 1
+                    and e.altezze[0] % 12 == alt % 12
+                    and p.ruolo in ("melodia", "controcanto")):
+                raddoppi += 1
+    verifica(spessi == 0, f"{spessi} accordi troppo densi sotto il solista")
+    verifica(forti == 0, f"{forti} eventi non ridotti di dinamica")
+    verifica(raddoppi == 0, f"{raddoppi} raddoppi della melodia sotto il solista")
+    deboli = {"pppp", "ppp", "pp", "p", "mp"}
+    verifica(all(e.dinamica not in deboli for e in chit.eventi
+                 if not e.pausa and e.dinamica),
+             "il solista e' rimasto in dinamica debole")
+
+
+def test_ia_degrada(inno):
+    """Senza chiave API il motore deve funzionare identico, IA o no."""
+    base = Configurazione(formazione={"flauto": 1, "violoncello": 1},
+                          livello="2a Media", stile="Normale")
+    con_ia = Configurazione(formazione={"flauto": 1, "violoncello": 1},
+                            livello="2a Media", stile="Normale", usa_ia=True)
+    a = esegui(inno, base, cartella=os.path.join(QUI, "_out"), nome_base="senza_ia")
+    b = esegui(inno, con_ia, cartella=os.path.join(QUI, "_out"), nome_base="con_ia")
+    firma_a = [(p.nome, [tuple(e.altezze) for e in p.eventi]) for p in a.partitura.parti]
+    firma_b = [(p.nome, [tuple(e.altezze) for e in p.eventi]) for p in b.partitura.parti]
+    verifica(firma_a == firma_b,
+             "con IA non disponibile il risultato dovrebbe essere identico")
+
+
 def test_chitarra():
     from arranger.vincoli import diteggiatura_chitarra
     do = diteggiatura_chitarra([48, 52, 55])
@@ -465,7 +769,8 @@ def test_chitarra():
 # --------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    inno, basso, sei_ottavi, migra, pause, scale = prepara()
+    (inno, basso, sei_ottavi, migra, pause, scale, ritmico, arpeggiata,
+     seconda, inciso) = prepara()
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)
@@ -484,6 +789,16 @@ if __name__ == "__main__":
     test_linee_non_frammentate(scale)
     test_dinamiche_progressive(inno)
     test_mani_non_si_scontrano(inno)
+    test_modalita_confronto(inno)
+    test_basso_ritmico(ritmico)
+    test_melodia_non_ribaltata(ritmico)
+    test_figurazione_conservata(arpeggiata)
+    test_seconda_voce(seconda, inno)
+    test_inciso_utilizzato(inciso)
+    test_materiale_non_sprecato(seconda, inciso)
+    test_accompagnamento_non_martellato(arpeggiata)
+    test_solista_debole(inno)
+    test_ia_degrada(inno)
     test_chitarra()
 
     print(f"\n{OK} verifiche superate, {len(KO)} fallite")

@@ -46,7 +46,9 @@ class Strumento:
 REGISTRO: Dict[str, Strumento] = {
     "flauto": Strumento(
         chiave="flauto", nome="Flauto", abbrev="Fl.",
-        estensione={"1a Media": (72, 84), "2a Media": (72, 88), "3a Media": (72, 93)},
+        # il flauto scende realmente al Do4: fermarsi al Do5 costringeva a
+        # ribaltare d'ottava mezze melodie
+        estensione={"1a Media": (62, 84), "2a Media": (60, 88), "3a Media": (60, 93)},
         programma_midi=73, famiglia="fiati",
         ruoli=["melodia", "controcanto", "armonia"],
     ),
@@ -64,7 +66,7 @@ REGISTRO: Dict[str, Strumento] = {
     ),
     "tromba": Strumento(
         chiave="tromba", nome="Tromba in Sib", abbrev="Tr.",
-        estensione={"1a Media": (60, 72), "2a Media": (58, 77), "3a Media": (55, 82)},
+        estensione={"1a Media": (58, 72), "2a Media": (56, 77), "3a Media": (54, 82)},
         trasposizione=2, programma_midi=56, famiglia="ottoni",
         ruoli=["melodia", "controcanto", "armonia"],
     ),
@@ -92,7 +94,7 @@ REGISTRO: Dict[str, Strumento] = {
         chiave="pianoforte", nome="Pianoforte", abbrev="Pf.",
         # il pianoforte legge in due chiavi: il registro grave non e' un
         # problema di difficolta', e comprimerlo snatura i bassi
-        estensione={"1a Media": (40, 84), "2a Media": (36, 88), "3a Media": (28, 96)},
+        estensione={"1a Media": (36, 84), "2a Media": (33, 88), "3a Media": (28, 96)},
         monofonico=False, polifonia_max=8, programma_midi=0, famiglia="tastiere",
         righi=2, puo_sigle=False,
         ruoli=["armonia", "basso", "ritmo", "melodia"],

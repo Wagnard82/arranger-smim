@@ -1,5 +1,12 @@
 # Arranger SMIM
 
+**Versione 0.2.0.** Il registro delle modifiche vive in `arranger/versione.py`
+(`VERSIONE`, `NOVITA`) ed e' mostrato dall'interfaccia in una colonna a destra:
+chi prova una versione nuova deve sapere che cosa e' cambiato senza andarlo a
+cercare. La stessa versione finisce nel tag `<software>` del MusicXML e nel
+campo `arranger` del sorgente LilyPond, cosi' da un file si risale sempre a
+quale build lo ha prodotto.
+
 Arrangiatore automatico per orchestra scolastica: trasforma uno spartito per
 pianoforte (o un audio / link YouTube) in una partitura completa per la
 formazione della scuola media a indirizzo musicale, rispettando i vincoli
@@ -141,13 +148,50 @@ pattern di percussione.
   `F#m7b5` nate da note di passaggio) a 96, per il 93% triadi e settime di
   dominante.
 
-- **Basso** — nota piu' grave della mano sinistra; **se non appartiene
-  all'accordo viene sostituita dalla fondamentale**, come da specifica.
+- **Basso** — si segue la voce piu' grave **nota per nota, con il suo ritmo**:
+  la mano sinistra di un accompagnamento pianistico ha quasi sempre una
+  figurazione riconoscibile, e ridurla a una nota per accordo butta via proprio
+  l'informazione ritmica piu' utile. Due filtri distinguono il basso dal resto:
+  un attacco non fa basso se sta aggiungendo un accordo sopra un basso ancora
+  in corso, ne' se sta piu' di una terza sopra il registro grave della misura
+  (cosi' un basso albertino Do-Sol-Mi-Sol si riduce al suo vero basso), con
+  l'eccezione dei raddoppi all'ottava, che della figurazione fanno parte.
+  Ogni nota arriva fino all'attacco successivo senza scavalcare la stanghetta:
+  gli attacchi restano quelli dell'originale, cioe' il ritmo. Se non appartiene
+  all'accordo, la nota diventa **la fondamentale**, come da specifica.
+  Il ruolo di basso va al violoncello se c'e', altrimenti allo strumento con
+  l'estensione piu' grave fra quelli presenti.
 
 - **Dinamiche** — i segni presenti nel MusicXML originale (`<dynamics>` o
   `sound dynamics=`) **e le forcelle** `<wedge>` (crescendo / diminuendo)
   vengono letti, conservati nello `Spartito` e riportati su tutte le parti,
   sia nell'export MusicXML sia in LilyPond (`\<`, `\>`, `\!`).
+
+- **Incisi** (`Analisi.frammenti`) — scale, volatine, riempimenti, code di
+  frase: materiale melodico BREVE che non forma una voce continua e che quindi
+  sfugge sia alla melodia sia alle voci interne. Si accetta un inciso solo se
+  ha una direzione — almeno tre note per grado congiunto nello stesso verso —
+  e quattro altezze diverse, cosi' il tremolio fra due note di un accordo non
+  viene scambiato per una scala. Sono proprio le cose che in una partitura
+  scolastica fanno la differenza, e buttarle via significa sprecare meta'
+  dello spartito.
+
+- **Voci interne** — dopo melodia e basso si cerca, sul materiale rimasto, se
+  esiste ancora una linea cantabile: seconde e terze voci, controcanti,
+  contrappunti. Tre accorgimenti separano una voce da una collana di note:
+  la si cerca **dentro un solo rigo** per volta (cercandola su entrambi si
+  ottiene una linea che salta da una mano all'altra); la proposta viene
+  **spezzata nei suoi episodi**, perche' in musica una voce interna dura
+  qualche battuta e non tutto il brano; ogni episodio viene tenuto solo se sta
+  in due ottave, ha almeno quattro altezze diverse, non e' dominato da due sole
+  note e si muove per grado almeno un terzo delle volte — senza quest'ultimo
+  controllo un basso albertino diventa un contrappunto.
+
+- **Figurazione** — una volta riconosciuta la melodia, **tutto il resto e'
+  accompagnamento** e viene conservato come layer a se' (`Analisi.figurazione`),
+  con i suoi attacchi e le sue durate. E' il materiale da cui vengono arpeggi e
+  pattern ritmici: ridurlo a una griglia di accordi butta via la parte piu'
+  caratteristica di molti brani.
 
 - **Groove e frasi** — pattern d'attacco dominante, suddivisione prevalente,
   segmentazione in frasi (pause, note lunghe, gruppi di 4 misure) usata per la
@@ -159,8 +203,30 @@ pattern di percussione.
 |---|---|
 | **Normale** | Flauti/Violini 1 sulla melodia, chitarra e piano sugli accordi a blocchi, violoncello sul basso, clarinetto/sax/violini 2 su controcanti |
 
-Gli accordi a blocchi non vengono stesi sulla durata dell'armonia ma disposti
-sul **groove** rilevato: se l'originale ha basso sul primo movimento e accordo
+**Il pianoforte riproduce l'accompagnamento scritto.** Dalla 2a media in su, la
+mano sinistra viene ripresa per intero dall'originale — bassi compresi, non
+solo la figurazione — e la destra riprende cio' che resta della mano destra
+tolta la melodia. La copia mantiene le **ottave dell'originale**: il pianoforte
+ha gia' l'estensione che serve, e trasportare i registri e' il modo piu' rapido
+per ottenere collisioni fra le mani. Se nell'originale la destra fa solo
+melodia, qui tace: inventarle accordi produce solo scontri con la sinistra. Arpeggi, bassi ribattuti e figure ritmiche sopravvivono
+invece di diventare una semibreve per battuta. Gli eventi copiati sono marcati
+`letterale` e vengono esclusi dalla levigatura delle ottave, che altrimenti
+riordinerebbe le note di un arpeggio.
+
+In 1a media la copia fedele e' disattivata: valori brevi e salti degli arpeggi
+non sono ancora alla portata, e si torna alla riduzione per accordi.
+
+Chitarra e secondo pianoforte non copiano alla lettera ma suonano le note
+dell'armonia **sul ritmo dell'accompagnamento originale**, arpeggiando o a
+blocchi: respirano con il brano senza raddoppiare il pianoforte.
+
+Nel frattempo il **violoncello** (o lo strumento piu' grave disponibile) tiene
+la linea di basso ridotta: cosi' l'orchestra ha insieme il sostegno grave e la
+figurazione viva.
+
+Gli accordi a blocchi, quando servono, non vengono stesi sulla durata
+dell'armonia ma disposti sul **groove** rilevato: se l'originale ha basso sul primo movimento e accordo
 sul secondo (il pattern della *Gymnopedie*), l'accompagnamento lo riproduce, e
 sugli strumenti a due righi la destra non raddoppia l'attacco del basso.
 | **Cinematico** | Archi in tremolo e pizzicato, pianoforte ad arpeggi ampi, fiati su pad lunghi, glockenspiel che raddoppia la melodia **nei climax** (individuati per densita' e registro) |
@@ -171,6 +237,19 @@ parte. Il primo accompagna, il secondo prende melodia o controcanto e cambia
 scrittura (arpeggi invece di blocchi, basso sostenuto invece di basso
 articolato). Il campo `Parte.variante` porta l'indice del diviso ed e' il punto
 in cui aggiungere altre scritture alternative.
+
+**Niente materiale sprecato.** Dalla 2a media in su, voci interne e incisi
+rimasti fuori vengono affidati agli strumenti che in quel punto tacciono; se
+non ne tace nessuno, prendono il posto di chi sta facendo solo riempimento
+armonico — un inciso dell'originale vale piu' di un pad inventato. Nella
+scelta hanno la precedenza i **monodici**: una scala su una chitarra
+strimpellata non si sente, su un flauto si'. Chi ha gia' una voce interna da
+suonare viene escluso dalla staffetta della melodia, per non ritrovarsi a
+contendersi due parti.
+
+L'accompagnamento a note ripetute viene **diradato**: al massimo un attacco per
+movimento sulla chitarra, due al pianoforte. Ribattere l'accordo su ogni croma
+della figurazione non e' accompagnare.
 
 **Staffetta della melodia**: le frasi vengono distribuite a rotazione fra gli
 strumenti in grado di portarla, con raddoppi facoltativi — la melodia passa
@@ -198,6 +277,11 @@ di misura:
    tastiera (6 corde, apertura massima, fondamentale al basso, capotasto
    limitato per livello); prima posizione e cambi di corda per gli archi;
    apertura della mano al pianoforte.
+> Tutto cio' che e' **copia dell'originale** — melodia, voci interne,
+> figurazione del pianoforte — e' marcato `letterale` ed esce da estensione,
+> salti, alterazioni, incroci e levigatura delle ottave. Quei filtri servono a
+> rendere suonabile cio' che il motore inventa, non a riscrivere il testo.
+
 6. **Incroci** — sugli strumenti a due righi la mano destra non scende mai
    sotto la sinistra e non ne raddoppia le note: si alza la destra, o si
    abbassa la sinistra quando e' la destra a portare una melodia grave.
@@ -213,7 +297,9 @@ di misura:
 > le sue sincopi restano quelle dell'originale.
 
 > La melodia resta **sempre** intatta nelle altezze e nel profilo: subisce solo
-> trasposizioni d'ottava, e per frase intera, mai nota per nota. Non le si
+> trasposizioni d'ottava, e per l'intero blocco assegnato allo strumento. Solo
+> se il blocco non sta nell'ambito si spezza sui respiri, scegliendo per ogni
+> tratto l'ottava piu' vicina a quella del tratto precedente. Non le si
 > applicano nemmeno il filtro ritmico ne' quello dei salti.
 
 ### Linee non frammentate
@@ -251,6 +337,35 @@ aprano il file senza correzioni.
 
 In piu' viene generato un **MIDI di anteprima** per l'ascolto rapido.
 
+### Modalita' confronto (debug)
+
+`Configurazione(debug_originale=True)` — nell'interfaccia "Modalita' confronto",
+da riga di comando `--confronto` — accoda in fondo alla partitura lo spartito
+di partenza ricostruito su due righi. Aprendo il MusicXML si legge
+l'arrangiamento sopra e l'originale sotto, allineati battuta per battuta: e' il
+modo piu' rapido per verificare melodia, armonia e ritmo.
+
+La parte di confronto viene aggiunta **dopo** la validazione e non passa da
+nessun filtro: e' il testo originale e va letto esattamente com'e'.
+
+### Ingresso da PDF (riconoscimento ottico)
+
+`ingestione.da_pdf` accetta un PDF e lo converte in MusicXML delegando a un
+motore OMR esterno, provando in ordine:
+
+1. **Audiveris** (gratuito, Java) se e' nel PATH — il piu' accurato sulla
+   musica stampata;
+2. **oemer** (`pip install oemer`) — solo Python, ma richiede molta memoria.
+
+Nessuno dei due e' incluso fra le dipendenze: pesano troppo per un servizio
+cloud gratuito, quindi sull'istanza pubblica il caricamento di PDF resta
+disattivato e l'interfaccia spiega come convertire il file altrove (MuseScore 4,
+Audiveris, PlayScore, Soundslice).
+
+> Il riconoscimento ottico sbaglia spesso alterazioni, voci e legature, e gli
+> errori si propagano all'intero arrangiamento: il MusicXML prodotto va sempre
+> riletto prima di arrangiarlo.
+
 ### Modulo 4b — Export LilyPond
 
 `arranger/lilypond.py` produce il sorgente `.ly` e, se l'eseguibile e' nel PATH,
@@ -281,6 +396,15 @@ la generazione del sorgente mantenendo intatti i moduli 1–3.
 
 ---
 
+### Solisti deboli
+
+Chitarra, glockenspiel, metallofono e violoncello non hanno la proiezione di un
+flauto: se portano la melodia, qualunque accompagnamento denso li copre. Nei
+tratti in cui uno di loro e' solista, l'arrangiamento viene **diradato**: via i
+raddoppi della melodia, accordi ridotti a due note, percussioni solo sul primo
+movimento, dinamica giu' per tutti; il solista sale a mezzoforte (o resta alla
+dinamica scritta nell'originale, se piu' forte).
+
 ## Strato IA (facoltativo)
 
 Attivo solo con `ANTHROPIC_API_KEY` impostata e il pacchetto `anthropic`
@@ -288,12 +412,30 @@ installato; se manca, tutto continua a funzionare con le regole interne.
 L'IA interviene dove le regole deterministiche sono deboli, cioe' nelle scelte
 di gusto:
 
-1. `piano_orchestrazione` — chi porta la melodia frase per frase e dove
+1. `melodia_per_misura` — al modello vengono sottoposte, **misura per
+   misura**, le tre linee candidate a essere la melodia; sceglie la piu'
+   cantabile. E' il punto in cui le euristiche sono piu' fragili: melodia che
+   migra fra le mani, voci raddoppiate, sezioni senza melodia.
+2. `consiglia_arrangiamento` — stile, tipo di accompagnamento, densita' e
+   andamento adatti al brano. Con lo stile impostato su **"Automatico"** la
+   scelta viene applicata.
+3. `riferimenti_web` — cerca cosa si sa del brano originale (genere, tempo,
+   organico della versione piu' nota, struttura, carattere
+   dell'accompagnamento) e lo passa al punto 2 come indizio.
+4. `piano_orchestrazione` — chi porta la melodia frase per frase e dove
    collocare i climax;
-2. `revisiona_armonia` — revisione delle sigle con bassa confidenza secondo la
+5. `revisiona_armonia` — revisione delle sigle con bassa confidenza secondo la
    logica tonale;
-3. `relazione_didattica` — sintesi in italiano degli interventi del validatore,
+6. `relazione_didattica` — sintesi in italiano degli interventi del validatore,
    scritta per il docente.
+
+> **Sull'ascolto dell'originale.** L'API non accetta audio: non e' possibile far
+> ascoltare al modello una registrazione (YouTube o altro) e confrontarla con
+> l'arrangiamento. Cio' che si puo' fare, ed e' implementato, e' raccogliere
+> per iscritto quello che dell'originale e' documentato e usarlo come indizio
+> sullo stile. Un confronto vero con l'audio richiederebbe un modello di
+> analisi musicale separato, applicato a una registrazione scaricata: e' una
+> pipeline diversa, non un prompt.
 
 ---
 

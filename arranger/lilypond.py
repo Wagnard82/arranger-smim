@@ -53,6 +53,11 @@ DRUM_LY = {PERC_MIDI["grancassa"]: "bd", PERC_MIDI["rullante"]: "sn",
 ARTICOLAZIONI = {"staccato": "-.", "accent": "->", "tenuto": "--"}
 
 
+def _versione() -> str:
+    from .versione import VERSIONE
+    return VERSIONE
+
+
 def altezza_ly(midi: int, fifths: int = 0) -> str:
     tavola = NOMI_LY_BEMOLLE if fifths < 0 else NOMI_LY
     nome = tavola[midi % 12]
@@ -107,7 +112,7 @@ class EsportatoreLilyPond:
                 f'  title = "{titolo}"\n'
                 f'  subtitle = "{sotto}"\n'
                 f'  composer = "{comp}"\n'
-                '  arranger = "Arranger SMIM"\n'
+                f'  arranger = "Arranger SMIM {_versione()}"\n'
                 '  tagline = ##f\n'
                 "}\n\n"
                 "\\paper {\n"

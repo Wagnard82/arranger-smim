@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import struct
+import sys
 import zipfile
 from typing import Dict, List, Optional, Tuple
 from xml.etree import ElementTree as ET
@@ -42,6 +43,8 @@ def ingerisci(sorgente: str, **opzioni) -> Spartito:
         return da_musicxml(sorgente)
     if ext in (".mid", ".midi"):
         return da_midi(sorgente, **opzioni)
+    if ext == ".pdf":
+        return da_pdf(sorgente, **opzioni)
     if ext in (".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".mkv"):
         return da_audio(sorgente, **opzioni)
     raise ValueError(f"Formato non riconosciuto: {ext or sorgente}")
@@ -441,6 +444,77 @@ def da_midi(percorso: str, livello_quantizzazione: float = 0.25, **_) -> Spartit
     sp = Spartito(titolo=os.path.basename(percorso), note=note, bpm=bpm)
     _costruisci_misure(sp, metro)
     return riduzione_pianistica(sp, livello_quantizzazione)
+
+
+# ==========================================================================
+# Ramo C - PDF / immagine (riconoscimento ottico della notazione)
+# ==========================================================================
+
+
+def stato_dipendenze_omr() -> Dict[str, bool]:
+    """Motori di riconoscimento ottico disponibili sulla macchina."""
+    stato = {"oemer": False, "audiveris": shutil.which("audiveris") is not None}
+    try:
+        import oemer  # noqa: F401
+        stato["oemer"] = True
+    except ImportError:
+        pass
+    return stato
+
+
+def pdf_in_musicxml(percorso: str, cartella: str = "tmp_smim") -> str:
+    """
+    Converte un PDF (o un'immagine) in MusicXML con un motore OMR.
+
+    Si prova prima Audiveris, se installato: e' il piu' accurato sulla musica
+    stampata. In alternativa `oemer`, che si installa con pip ma richiede molta
+    memoria. Nessuno dei due e' incluso: sono pesanti e non girano su un
+    servizio cloud gratuito.
+    """
+    os.makedirs(cartella, exist_ok=True)
+    stato = stato_dipendenze_omr()
+
+    if stato["audiveris"]:
+        import subprocess
+        esito = subprocess.run(
+            [shutil.which("audiveris"), "-batch", "-export",
+             "-output", cartella, "--", percorso],
+            capture_output=True, text=True, timeout=900)
+        prodotti = [os.path.join(cartella, f) for f in os.listdir(cartella)
+                    if f.lower().endswith((".mxl", ".musicxml", ".xml"))]
+        if prodotti:
+            return max(prodotti, key=os.path.getmtime)
+        raise RuntimeError("Audiveris non ha prodotto un MusicXML:\n"
+                           + (esito.stderr or esito.stdout)[-1500:])
+
+    if stato["oemer"]:
+        import subprocess
+        esito = subprocess.run([sys.executable, "-m", "oemer", percorso,
+                                "-o", cartella],
+                               capture_output=True, text=True, timeout=1800)
+        prodotti = [os.path.join(cartella, f) for f in os.listdir(cartella)
+                    if f.lower().endswith((".musicxml", ".xml"))]
+        if prodotti:
+            return max(prodotti, key=os.path.getmtime)
+        raise RuntimeError("oemer non ha prodotto un MusicXML:\n"
+                           + (esito.stderr or esito.stdout)[-1500:])
+
+    raise RuntimeError(
+        "Nessun motore di riconoscimento ottico disponibile.\n"
+        "Opzioni, dalla piu' affidabile:\n"
+        "  1. Audiveris (gratuito, Java): installalo e mettilo nel PATH;\n"
+        "  2. pip install oemer (solo Python, ma richiede molta memoria);\n"
+        "  3. converti il PDF in MusicXML con un servizio esterno "
+        "(MuseScore, PlayScore, Soundslice) e carica il file risultante.\n"
+        "In ogni caso RILEGGI il MusicXML prodotto prima di arrangiarlo: "
+        "l'OMR sbaglia spesso alterazioni, voci e legature.")
+
+
+def da_pdf(percorso: str, cartella_tmp: str = "tmp_smim", **opz) -> Spartito:
+    xml = pdf_in_musicxml(percorso, cartella_tmp)
+    sp = da_musicxml(xml)
+    sp.titolo = sp.titolo or os.path.splitext(os.path.basename(percorso))[0]
+    return sp
 
 
 # ==========================================================================
