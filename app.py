@@ -11,20 +11,23 @@ from __future__ import annotations
 
 import os
 import smtplib
+from datetime import datetime
 import tempfile
 import traceback
 from email.message import EmailMessage
 from urllib.parse import quote
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from arranger import Configurazione, esegui
 from arranger import ia
+from arranger.anteprima import html_anteprima
 from arranger.modello import nome_it
 from arranger.orchestratore import costruisci_parti
 from arranger.ingestione import stato_dipendenze_omr
 from arranger.strumenti import LIVELLI, ORDINE_PARTITURA, REGISTRO, livello, strumento
-from arranger.versione import DATA, NOVITA, PRECEDENTE, VERSIONE
+from arranger.versione import COMPILATO, DATA, NOVITA, PRECEDENTE, VERSIONE
 
 DESTINATARIO = "claudiobianchi82@gmail.com"
 
@@ -33,9 +36,16 @@ st.set_page_config(page_title="Arranger SMIM", page_icon="🎼", layout="wide")
 CARTELLA = os.path.join(tempfile.gettempdir(), "arranger_smim")
 os.makedirs(CARTELLA, exist_ok=True)
 
-st.title(f"🎼 Arranger SMIM · v{VERSIONE}")
+st.title(f"🎼 Arranger SMIM · v{VERSIONE}, {COMPILATO}")
 st.caption("Da uno spartito per pianoforte a una partitura per orchestra "
            "scolastica, con controllo automatico dei limiti didattici.")
+
+# Diagnostica: quale file sta girando davvero e quando e' stato modificato.
+# Con piu' copie del progetto sul disco e' l'unico modo per esserne certi.
+_percorso_app = os.path.abspath(__file__)
+_modificato = datetime.fromtimestamp(os.path.getmtime(_percorso_app))
+st.caption(f"File in esecuzione: `{_percorso_app}` — modificato il "
+           f"{_modificato:%d/%m/%Y alle %H.%M}")
 
 PRINCIPALE, REGISTRO_MODIFICHE = st.columns([3, 1], gap="large")
 
@@ -108,10 +118,21 @@ with st.sidebar:
     liv = st.radio("Classe", list(LIVELLI.keys()), index=0, label_visibility="collapsed")
     st.info(livello(liv).note)
 
-    st.header("3 · Stile")
-    stili = ["Normale", "Cinematico", "Jazz"]
-    if ia.disponibile():
-        stili.append("Automatico")
+    st.header("3 · Impostazione")
+    modo = st.radio(
+        "Come trattare il brano",
+        ["auto", "melodico", "tessitura"], horizontal=True,
+        format_func=lambda x: {"auto": "Automatico",
+                               "melodico": "Melodia + accompagnamento",
+                               "tessitura": "Orchestra i registri"}[x],
+        help=("'Melodia + accompagnamento' cerca il tema e lo affida a un "
+              "solista. 'Orchestra i registri' non cerca nessuna melodia e "
+              "divide il tessuto dell'originale fra gli strumenti per fasce "
+              "di altezza: e' la scelta giusta per i brani puramente "
+              "pianistici, dove un tema da cantare non c'e'."))
+
+    st.header("3b · Stile")
+    stili = ["Normale", "Cinematico", "Jazz", "Automatico"]
     stile = st.selectbox(
         "Stile di arrangiamento", stili,
         help=("'Automatico' fa scegliere stile e tipo di accompagnamento "
@@ -129,6 +150,20 @@ with st.sidebar:
         help=("Se non selezioni nulla decide il motore. Selezionando piu' "
               "strumenti la melodia passa dall'uno all'altro, frase per frase."))
     staffetta = st.checkbox("Fai passare la melodia fra i solisti", value=True)
+    cambio = st.selectbox(
+        "Quando cambiare solista",
+        ["auto", "periodo", "sezione", "frase"], disabled=not staffetta,
+        help=("Lo scambio avviene sempre a fine frase. 'periodo' aspetta la "
+              "chiusura del periodo (antecedente + conseguente), 'sezione' "
+              "cambia fra strofa e ritornello. Con 'auto' decide il software "
+              "in base alla forma del brano, e nei ritornelli manda i solisti "
+              "all'unisono."))
+    minimo_solista = st.slider(
+        "Misure minime prima di passare la melodia", 2, 24, 8,
+        disabled=not staffetta,
+        help=("Anche se una frase finisce, il solista non cambia prima di "
+              "tante misure: scambi troppo ravvicinati confondono e non danno "
+              "il tempo di riconoscere il timbro."))
     raddoppi = st.checkbox("Consenti raddoppi della melodia", value=True)
 
     st.header("5 · Opzioni")
@@ -139,10 +174,53 @@ with st.sidebar:
         help=("Accoda in fondo alla partitura lo spartito originale, "
               "non modificato: aprendo il file si legge l'arrangiamento "
               "sopra e l'originale sotto, battuta per battuta."))
-    usa_ia = st.checkbox("Usa l'IA per le scelte di orchestrazione",
-                         value=False, disabled=not ia.disponibile())
-    if not ia.disponibile():
-        st.caption("IA non configurata: il motore lavora comunque con le sue regole.")
+    st.header("6 · Intelligenza artificiale")
+    # la chiave puo' arrivare dai segreti dell'istanza o essere incollata qui
+    try:
+        ia.configura_chiave(st.secrets["anthropic"]["api_key"])
+        chiave_da_segreti = True
+    except Exception:
+        chiave_da_segreti = False
+
+    stato_ia = ia.stato()
+    if not stato_ia["libreria"]:
+        st.caption("Per usare l'IA serve il pacchetto `anthropic` "
+                   "(`pip install anthropic`). Senza, il motore lavora "
+                   "comunque con le sue regole.")
+        usa_ia = False
+        funzioni_ia = set()
+        modello_ia = ia.MODELLO_DEFAULT
+    else:
+        if not chiave_da_segreti:
+            chiave = st.text_input("Chiave API Anthropic", type="password",
+                                   help="Resta solo in questa sessione.")
+            if chiave:
+                ia.configura_chiave(chiave)
+            stato_ia = ia.stato()
+
+        usa_ia = st.checkbox("Attiva l'IA", value=False,
+                             disabled=not stato_ia["chiave"])
+        if not stato_ia["chiave"]:
+            st.caption("Incolla una chiave API per attivarla.")
+
+        modello_etichetta = st.selectbox("Modello", list(ia.MODELLI),
+                                         disabled=not usa_ia)
+        modello_ia = ia.MODELLI[modello_etichetta]
+
+        predefinite = {"melodia", "stile"}
+        funzioni_ia = set()
+        for chiave_f, (titolo_f, spiega) in ia.FUNZIONI.items():
+            if st.checkbox(titolo_f, value=(chiave_f in predefinite),
+                           key=f"ia_{chiave_f}", disabled=not usa_ia,
+                           help=spiega):
+                funzioni_ia.add(chiave_f)
+        if usa_ia:
+            st.caption(f"{len(funzioni_ia)} chiamate al modello per "
+                       "arrangiamento (la ricerca sul brano ne aggiunge "
+                       "qualcuna in piu').")
+            if st.button("Prova la connessione"):
+                ok, messaggio = ia.prova_connessione(modello_ia)
+                (st.success if ok else st.error)(messaggio)
 
 # ==========================================================================
 # MODULO 1 - Ingestione (solo spartiti pianistici)
@@ -211,7 +289,12 @@ with PRINCIPALE:
                              livello=liv, stile=stile, trasporto=trasporto,
                              strumenti_melodia=scelte_melodia,
                              staffetta_melodia=staffetta, raddoppi_melodia=raddoppi,
-                             debug_originale=debug, usa_ia=usa_ia)
+                             modo=modo, cambio_solista=cambio,
+                             misure_minime_solista=minimo_solista,
+                             debug_originale=debug, usa_ia=usa_ia,
+                             modello_ia=modello_ia)
+        for funzione in ia.FUNZIONI:
+            setattr(cfg, f"ia_{funzione}", funzione in funzioni_ia)
 
         with st.spinner("Analisi e arrangiamento in corso..."):
             try:
@@ -232,8 +315,50 @@ with PRINCIPALE:
         st.success(f"Arrangiamento di **{r.master.titolo}** completato: "
                    f"{len(r.partitura.parti)} parti, {len(r.partitura.misure)} misure.")
 
-        t1, t2, t3, t4 = st.tabs(["📥 Download", "🔍 Analisi dello spartito",
-                                  "🎻 Parti generate", "✅ Report dei filtri"])
+        t0, t1, t2, t3, t4 = st.tabs(
+            ["👀 Anteprima", "📥 Download", "🔍 Analisi dello spartito",
+             "🎻 Parti generate", "✅ Report dei filtri"])
+
+        with t0:
+            c1, c2 = st.columns([1, 1])
+            quante = c1.slider(
+                "Misure da mostrare", 4, max(8, len(r.partitura.misure)),
+                min(16, len(r.partitura.misure)),
+                help=("Disegnare tutto il brano nel browser e' lento: per "
+                      "farsi un'idea bastano le prime pagine."))
+            zoom = c2.slider("Ingrandimento", 0.4, 1.2, 0.7, 0.05)
+            con_audio = st.checkbox(
+                "Includi il lettore MIDI", value=True,
+                help="Ascolto approssimativo, utile per l'insieme.")
+            try:
+                with open(r.percorso_xml, encoding="utf-8") as f:
+                    xml_partitura = f.read()
+                dati_midi = None
+                if con_audio and r.percorso_midi and os.path.exists(r.percorso_midi):
+                    with open(r.percorso_midi, "rb") as f:
+                        dati_midi = f.read()
+                components.html(
+                    html_anteprima(xml_partitura, midi=dati_midi, zoom=zoom,
+                                   misure=int(quante)),
+                    height=820, scrolling=True)
+                st.caption("L'anteprima e' indicativa: per l'impaginazione "
+                           "definitiva apri il MusicXML in MuseScore, Dorico "
+                           "o Sibelius.")
+            except Exception as errore:
+                st.warning(f"Anteprima non disponibile: {errore}. "
+                           "Il file resta scaricabile dalla scheda Download.")
+            with st.expander("Non vedi niente qui sopra?"):
+                st.markdown(
+                    "L'anteprima e' disegnata nel browser da due librerie "
+                    "caricate da internet: **non serve installare nulla**, "
+                    "ma serve la connessione.\n\n"
+                    "- Se lavori offline, o la rete blocca "
+                    "`cdn.jsdelivr.net` e `unpkg.com`, il riquadro resta "
+                    "vuoto. Il MusicXML nella scheda **Download** e' "
+                    "comunque completo.\n"
+                    "- Se hai un blocco pubblicita' attivo, provalo a "
+                    "disattivare su questa pagina.\n"
+                    "- Su partiture lunghe abbassa il numero di misure.")
 
         with t1:
             with open(r.percorso_xml, "rb") as f:
@@ -261,6 +386,14 @@ with PRINCIPALE:
                       if r.master.anacrusi else "assente")
             c2.metric("Note lette", len(r.master.note))
             c3.metric("Accordi dedotti", len(r.analisi.armonia))
+        c4, c5, c6 = st.columns(3)
+        c4.metric("Forma", r.analisi.forma.capitalize())
+        c5.metric("Frasi / periodi",
+                  f"{len(r.analisi.frasi)} / {len(r.analisi.periodi)}")
+        c6.metric("Ritornelli", len(r.analisi.ritornelli))
+        if r.analisi.sezioni:
+            st.markdown("**Sezioni riconosciute**")
+            st.code(" ".join(e for _a, _b, e in r.analisi.sezioni))
             st.markdown("**Melodia rilevata**")
             st.code(" ".join(nome_it(n.midi) for n in r.analisi.melodia[:80]) or "-")
             st.markdown("**Griglia armonica**")

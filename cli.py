@@ -43,9 +43,23 @@ def main(argv=None) -> int:
                     choices=["Normale", "Cinematico", "Jazz", "Automatico"])
     ap.add_argument("--trasporto", type=int, default=0)
     ap.add_argument("--no-staffetta", action="store_true")
+    ap.add_argument("--modo", default="auto",
+                    choices=["auto", "melodico", "tessitura"],
+                    help="melodico = melodia + accompagnamento; "
+                         "tessitura = orchestra i registri dell'originale")
+    ap.add_argument("--cambio", default="auto",
+                    choices=["auto", "frase", "periodo", "sezione"],
+                    help="dove avviene lo scambio fra i solisti")
+    ap.add_argument("--misure-minime-solista", type=int, default=8,
+                    help="misure minime prima di passare la melodia")
     ap.add_argument("--confronto", action="store_true",
                     help="accoda lo spartito originale in fondo alla partitura")
-    ap.add_argument("--ia", action="store_true", help="usa l'API Anthropic")
+    ap.add_argument("--ia", action="store_true", help="attiva lo strato IA")
+    ap.add_argument("--ia-funzioni", default="melodia,stile",
+                    help=("funzioni IA da attivare, separate da virgola: "
+                          "melodia, riferimenti, stile, orchestrazione, "
+                          "armonia, relazione (default: melodia,stile)"))
+    ap.add_argument("--modello-ia", default="claude-sonnet-4-6")
     ap.add_argument("--lilypond", action="store_true",
                     help="genera anche il sorgente .ly")
     ap.add_argument("--pdf", action="store_true",
@@ -55,7 +69,14 @@ def main(argv=None) -> int:
 
     cfg = Configurazione(formazione=a.organico, livello=a.livello, stile=a.stile,
                          trasporto=a.trasporto, staffetta_melodia=not a.no_staffetta,
-                         debug_originale=a.confronto, usa_ia=a.ia)
+                         modo=a.modo, cambio_solista=a.cambio,
+                         misure_minime_solista=a.misure_minime_solista,
+                         debug_originale=a.confronto, usa_ia=a.ia,
+                         modello_ia=a.modello_ia)
+    scelte = {x.strip() for x in a.ia_funzioni.split(",") if x.strip()}
+    for funzione in ("melodia", "riferimenti", "stile", "orchestrazione",
+                     "armonia", "relazione"):
+        setattr(cfg, f"ia_{funzione}", funzione in scelte)
     r = esegui(a.sorgente, cfg, cartella=a.output,
                esporta_ly=a.lilypond or a.pdf, incidi_pdf=a.pdf)
 

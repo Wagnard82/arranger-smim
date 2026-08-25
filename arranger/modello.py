@@ -104,6 +104,8 @@ class Spartito:
     anacrusi: float = 0.0  # durata in quarti della battuta di levare (0 = nessuna)
     dinamiche: List[Tuple[float, str]] = field(default_factory=list)
     # [(offset in quarti, "p"/"mf"/"ff"/...)] lette dallo spartito originale
+    sigle: List[Tuple[float, int, str, Optional[int]]] = field(default_factory=list)
+    # [(offset, fondamentale pc, qualita, basso pc)] lette dai <harmony> del file
     gradazioni: List[Tuple[float, float, str]] = field(default_factory=list)
     # [(inizio, fine, "crescendo"/"diminuendo")] dalle forcelle <wedge>
 
@@ -189,6 +191,13 @@ class Analisi:
     groove: List[float] = field(default_factory=list)   # posizioni d'attacco tipiche (in quarti dalla stanghetta)
     suddivisione: float = 0.5                            # 1.0=semiminime, 0.5=crome, 0.25=semicrome
     frasi: List[Tuple[float, float]] = field(default_factory=list)  # (inizio, fine) in quarti
+    periodi: List[Tuple[float, float]] = field(default_factory=list)
+    # coppie di frasi (antecedente + conseguente)
+    sezioni: List[Tuple[float, float, str]] = field(default_factory=list)
+    # (inizio, fine, etichetta): A, B, A' ... per riconoscere strofa e ritornello
+    forma: str = "classica"          # "classica" oppure "pop"
+    melodia_affidabile: bool = True  # False nei brani di sola tessitura
+    ritornelli: List[Tuple[float, float]] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -239,6 +248,8 @@ class Parte:
     programma_midi: int = 74
     mostra_sigle: bool = False
     righi: int = 1                # 2 per il pianoforte
+    ambito_rigo: Optional[Dict[int, Tuple[int, int]]] = None
+    # limiti per rigo: la destra non scende in cantina, la sinistra non sale
     variante: int = 0             # indice del diviso: differenzia le scritture
                                   # fra Pianoforte 1 e 2, Chitarra 1 e 2, ecc.
 
@@ -284,10 +295,25 @@ class Configurazione:
     strumenti_melodia: List[str] = field(default_factory=list)
     # id delle parti abilitate a portare la melodia (vuoto = decide il motore)
     staffetta_melodia: bool = True     # la melodia passa fra piu' strumenti
+    cambio_solista: str = "auto"       # auto | frase | periodo | sezione
+    misure_minime_solista: int = 8     # un solista tiene la melodia almeno
+                                       # per tante misure prima di passarla
     raddoppi_melodia: bool = True
+    modo: str = "auto"             # auto | melodico | tessitura
     debug_originale: bool = False   # accoda lo spartito originale alla partitura
     usa_ia: bool = False
     modello_ia: str = "claude-sonnet-4-6"
+    # singole funzioni dello strato IA, attivabili una per una: ognuna costa
+    # una chiamata, e non tutte servono sempre
+    ia_melodia: bool = True          # arbitrato della melodia misura per misura
+    ia_riferimenti: bool = False     # ricerca web sul brano originale
+    ia_stile: bool = True            # stile e tipo di accompagnamento
+    ia_orchestrazione: bool = False  # staffetta della melodia frase per frase
+    ia_armonia: bool = False         # revisione delle sigle poco affidabili
+    ia_relazione: bool = False       # relazione didattica per il docente
+
+    def ia_attiva(self, funzione: str) -> bool:
+        return self.usa_ia and bool(getattr(self, f"ia_{funzione}", False))
 
     def strumenti_attivi(self) -> List[str]:
         return [k for k, v in self.formazione.items() if v > 0]

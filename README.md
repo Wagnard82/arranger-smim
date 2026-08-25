@@ -1,6 +1,6 @@
 # Arranger SMIM
 
-**Versione 0.2.0.** Il registro delle modifiche vive in `arranger/versione.py`
+**Versione 0.3.0.** Il registro delle modifiche vive in `arranger/versione.py`
 (`VERSIONE`, `NOVITA`) ed e' mostrato dall'interfaccia in una colonna a destra:
 chi prova una versione nuova deve sapere che cosa e' cambiato senza andarlo a
 cercare. La stessa versione finisce nel tag `<software>` del MusicXML e nel
@@ -59,6 +59,7 @@ arranger/
   orchestratore.py  MODULO 3.2 - template di stile, staffetta, voicing
   vincoli.py        MODULO 3.3 - filtri di validazione didattica
   esportatore.py    MODULO 4 - MusicXML 4.0 partwise + MIDI di anteprima
+  distribuzione.py  casting: chi fa melodia, basso, seconde voci, armonia
   strumenti.py      registro strumenti + regole per livello
   lilypond.py       MODULO 4b - sorgente .ly + incisione PDF
   ia.py             strato IA opzionale (API Anthropic)
@@ -133,7 +134,38 @@ pattern di percussione.
   il brano (`esempi/melodia_al_basso.xml`) e quando ci passa solo per alcune
   battute (`esempi/melodia_che_migra.xml`).
 
-- **Armonia** — dedotta dal materiale realmente scritto, con tre meccanismi
+  **Quando il tema sta a una mano, si prende tutto.** Il rilevatore lavora
+  nota per nota e puo' lasciare buchi: salta un salto verso il basso, una
+  ripetizione, l'ultima croma della battuta. Se pero' in una misura e' chiaro
+  che il tema e' in una mano, e quella mano suona una linea sola (non accordi),
+  la melodia e' quella linea per intero. Vale anche per le misure vuote in
+  mezzo a un tratto: se prima e dopo la melodia sta alla stessa mano, quello e'
+  un buco, non un silenzio voluto.
+
+  **Quando la melodia non c'e'.** In un brano pianistico capita spesso:
+  introduzioni, interludi, accompagnamenti arpeggiati, pagine di puro effetto.
+  Il rilevatore, dovendo pur scegliere qualcosa, promuoveva l'arpeggio a tema.
+  Ora una misura viene riconosciuta come figurazione — e lasciata vuota —
+  quando la linea si muove quasi solo per salti su note dell'accordo, con
+  valori uniformi, **e sta sotto il registro in cui canta il brano**
+  (85esimo percentile delle note piu' acute). Quell'ultima condizione e'
+  decisiva: senza, un tema arpeggiato come quello di una fanfara verrebbe
+  scambiato per accompagnamento. Si scarta solo se la figurazione dura almeno
+  due misure di fila: un arpeggio isolato dentro un tema e' un abbellimento.
+
+  `strumenti_analisi.py` e' il banco di prova: dato un cartella di spartiti
+  stampa per ognuno copertura della melodia, quota di note alla mano sinistra,
+  salti oltre l'ottava e ambito, cosi' si vede se una modifica migliora o
+  peggiora le cose su un repertorio vero invece che su un solo brano.
+
+- **Armonia** — se lo spartito porta gia' le **sigle accordali**
+  (`<harmony>` nel MusicXML) vengono usate quelle: chi ha scritto il brano sa
+  qual e' l'accordo, l'analisi automatica lo indovina. Su *Hallelujah* la
+  deduzione azzecca l'86% dei movimenti, il che e' buono ma non quanto leggere
+  la sigla scritta.
+
+  Quando le sigle non ci sono, l'armonia viene dedotta dal materiale realmente
+  scritto, con tre meccanismi
   che tengono a bada il ritmo armonico (che altrimenti esplode a un accordo per
   nota di passaggio):
   1. le note brevi pesano meno — sono figurazione, non armonia — e il basso
@@ -193,9 +225,23 @@ pattern di percussione.
   pattern ritmici: ridurlo a una griglia di accordi butta via la parte piu'
   caratteristica di molti brani.
 
-- **Groove e frasi** — pattern d'attacco dominante, suddivisione prevalente,
-  segmentazione in frasi (pause, note lunghe, gruppi di 4 misure) usata per la
-  staffetta.
+- **Groove** — pattern d'attacco dominante e suddivisione prevalente.
+
+- **Frasi, periodi, sezioni** — ogni stanghetta riceve un punteggio di
+  "quanto e' probabile che qui finisca una frase", sommando **respiro** (una
+  pausa nella melodia), **allungamento** (l'ultima nota e' lunga: l'accento
+  agogico e' il segnale di chiusura piu' affidabile), **cadenza** (V-I o
+  arrivo sulla tonica) e **metrica**; una programmazione dinamica sceglie poi i
+  confini restando vicino alle quattro misure. Le frasi si accorpano in
+  **periodi** (antecedente + conseguente) e il brano viene confrontato con se
+  stesso, sugli intervalli, per trovare le **sezioni** ripetute (A, B, A').
+  Se una sezione torna almeno tre volte, o due volte occupando il 40% del
+  brano, la forma e' trattata come **canzone** e si individua il ritornello.
+
+  I confini scelti alle stanghette vengono poi **spostati sul respiro reale**:
+  si cerca il buco piu' ampio nella melodia entro due quarti dalla stanghetta e
+  si taglia li'. Senza questo passo, un levare o una coda di frase in fondo
+  alla battuta finisce orfano nella frase successiva.
 
 ### Modulo 3.2 — Motore di arrangiamento
 
@@ -232,6 +278,24 @@ sugli strumenti a due righi la destra non raddoppia l'attacco del basso.
 | **Cinematico** | Archi in tremolo e pizzicato, pianoforte ad arpeggi ampi, fiati su pad lunghi, glockenspiel che raddoppia la melodia **nei climax** (individuati per densita' e registro) |
 | **Jazz** | Crome in terzina (notate come terzine reali, con `time-modification`), walking bass su violoncello o mano sinistra, chitarra in comping sul levare, percussioni su pattern ride/charleston |
 
+**Casting (`distribuzione.py`)**. I ruoli si decidono **una volta sola**,
+guardando il materiale reale del brano. Il punteggio di idoneita' di uno
+strumento per un ruolo combina tre cose: l'**affinita' timbrica** (quanto quel
+timbro e' tipico per quella funzione nell'orchestra scolastica), la
+**copertura** (quante note del materiale entrano nell'ambito con una sola
+trasposizione d'ottava, con un premio a chi ci sta in tessitura naturale e una
+penalita' a chi deve salire di due ottave) e la **difficolta'** (valori brevi,
+salti ampi, alterazioni rispetto al livello).
+
+L'ordine di assegnazione e' melodia, basso, seconde voci, armonia — e a ogni
+passo si tiene da parte chi servira' dopo: pianoforte e chitarra non vengono
+sottratti all'accompagnamento per fargli fare un controcanto.
+
+**Un solista non accompagna.** Quando la melodia tace, tace anche lui: prima
+riempiva i vuoti con l'armonia, e il risultato era che gli strumenti cantavano
+e accompagnavano a turno senza una logica. Solo se la staffetta e' attiva, nelle
+frasi cantate da altri, passa a seconda voce o accompagnamento.
+
 **Divisi differenziati**: due pianoforti (o due chitarre) non suonano la stessa
 parte. Il primo accompagna, il secondo prende melodia o controcanto e cambia
 scrittura (arpeggi invece di blocchi, basso sostenuto invece di basso
@@ -250,6 +314,19 @@ contendersi due parti.
 L'accompagnamento a note ripetute viene **diradato**: al massimo un attacco per
 movimento sulla chitarra, due al pianoforte. Ribattere l'accordo su ogni croma
 della figurazione non e' accompagnare.
+
+**Dove si cambia solista.** Mai a caso: lo scambio avviene sui confini
+dell'unita' scelta — a fine **periodo** nei brani classici, fra una **sezione**
+e l'altra in quelli pop, cosi' la strofa resta di chi l'ha cominciata. Dentro
+un periodo la melodia non cambia mano. Nei **ritornelli** tutti i solisti vanno
+all'unisono: e' il momento in cui l'unisono ha senso.
+`Configurazione.cambio_solista` (`auto`, `frase`, `periodo`, `sezione`) permette
+di forzarlo.
+
+In piu' un solista tiene la melodia per almeno
+`Configurazione.misure_minime_solista` misure (8 di default): le unita' piu'
+corte vengono accorpate. Scambiarsi la melodia ogni due battute non e' una
+staffetta, e' confusione — nessuno fa in tempo a riconoscere il timbro.
 
 **Staffetta della melodia**: le frasi vengono distribuite a rotazione fra gli
 strumenti in grado di portarla, con raddoppi facoltativi — la melodia passa
@@ -337,6 +414,18 @@ aprano il file senza correzioni.
 
 In piu' viene generato un **MIDI di anteprima** per l'ascolto rapido.
 
+### Anteprima nel browser
+
+`arranger/anteprima.py` genera l'HTML che disegna la partitura dentro la pagina
+(**OpenSheetMusicDisplay**) e la fa ascoltare (**html-midi-player** sul MIDI di
+anteprima), cosi' l'arrangiamento si guarda prima di scaricarlo. Il numero di
+misure e l'ingrandimento sono regolabili: disegnare novanta battute per otto
+strumenti nel browser e' lento e, per farsi un'idea, inutile.
+
+Le due librerie arrivano da CDN: senza rete l'anteprima non si vede e la pagina
+lo dice, ma il download del MusicXML continua a funzionare. L'impaginazione
+definitiva resta quella del programma di notazione.
+
 ### Modalita' confronto (debug)
 
 `Configurazione(debug_originale=True)` — nell'interfaccia "Modalita' confronto",
@@ -396,6 +485,22 @@ la generazione del sorgente mantenendo intatti i moduli 1–3.
 
 ---
 
+### Orchestrazione per registri
+
+Quando un tema da affidare a un solista non c'e' — Debussy, la musica
+d'atmosfera, certi studi — cercarlo a tutti i costi produce un solista che
+canta l'arpeggio e un accompagnamento inventato. Con
+`Configurazione.modo = "tessitura"` (nell'interfaccia: **Orchestra i registri**)
+il tessuto dell'originale viene diviso in fasce di altezza e ogni fascia va allo
+strumento che ci sta dentro, con la scrittura dell'originale; il pianoforte
+tiene la sua parte com'e'.
+
+Il modo `auto` sceglie da solo, ma e' volutamente conservativo: passa alla
+tessitura solo quando la melodia riconosciuta copre meno della meta' del brano.
+Distinguere automaticamente un brano di tessitura da uno con un tema vero non e'
+affidabile con le metriche disponibili — su un repertorio di prova Clair de Lune
+e Fur Elise danno numeri quasi identici — quindi la scelta resta all'utente.
+
 ### Solisti deboli
 
 Chitarra, glockenspiel, metallofono e violoncello non hanno la proiezione di un
@@ -407,8 +512,19 @@ dinamica scritta nell'originale, se piu' forte).
 
 ## Strato IA (facoltativo)
 
-Attivo solo con `ANTHROPIC_API_KEY` impostata e il pacchetto `anthropic`
-installato; se manca, tutto continua a funzionare con le regole interne.
+Attivo solo con il pacchetto `anthropic` installato e una chiave API: la si
+mette in `st.secrets["anthropic"]["api_key"]` (vedi
+`.streamlit/secrets.toml.esempio`), nella variabile d'ambiente
+`ANTHROPIC_API_KEY`, oppure la incolla l'utente nella barra laterale. Se manca,
+tutto continua a funzionare con le regole interne.
+
+**Ogni funzione si attiva singolarmente** (`Configurazione.ia_melodia`,
+`ia_stile`, `ia_riferimenti`, `ia_orchestrazione`, `ia_armonia`,
+`ia_relazione`; da riga di comando `--ia --ia-funzioni melodia,stile`). Ognuna
+costa una chiamata al modello, e non tutte servono sempre: le predefinite sono
+melodia e stile. L'interfaccia mostra quante chiamate comporta la
+configurazione scelta, permette di scegliere il modello (Haiku, Sonnet, Opus) e
+ha un pulsante di prova della connessione.
 L'IA interviene dove le regole deterministiche sono deboli, cioe' nelle scelte
 di gusto:
 

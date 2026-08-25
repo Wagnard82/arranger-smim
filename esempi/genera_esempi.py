@@ -424,6 +424,167 @@ def con_inciso(percorso):
     return percorso
 
 
+def forma_di_canzone(percorso):
+    """
+    Struttura da canzone: strofa (A) ripetuta due volte e ritornello (B)
+    ripetuto due volte, piu' acuto. Serve a verificare che lo scambio dei
+    solisti avvenga fra le sezioni e che nel ritornello si vada all'unisono.
+    """
+    strofa = [[(67, 1), (69, 1), (67, 1), (64, 1)],
+              [(65, 1), (64, 1), (62, 2)],
+              [(67, 1), (69, 1), (71, 1), (72, 1)],
+              [(71, 2), (67, 2)]]
+    ritornello = [[(76, 1), (74, 1), (76, 1), (79, 1)],
+                  [(77, 2), (76, 2)],
+                  [(76, 1), (74, 1), (72, 1), (74, 1)],
+                  [(76, 4)]]
+    bassi = [48, 53, 55, 48]
+    righe = _intestazione("Forma di canzone")
+    numero = 0
+    for blocco in (strofa, strofa, ritornello, ritornello):
+        for i, battuta in enumerate(blocco):
+            numero += 1
+            righe.append(f'    <measure number="{numero}">')
+            if numero == 1:
+                righe += _attributi()
+            for midi, q in battuta:
+                righe += _nota(midi, q, 1, 1)
+            righe.append(f"      <backup><duration>{int(4 * DIV)}</duration></backup>")
+            righe += _nota(bassi[i], 4, 2, 2)
+            righe.append("    </measure>")
+    righe += ["  </part>", "</score-partwise>"]
+    _scrivi(percorso, righe)
+    return percorso
+
+
+def intro_senza_melodia(percorso):
+    """
+    Due battute di sola introduzione arpeggiata alla mano sinistra, poi il tema
+    alla destra. L'introduzione NON e' melodia e deve restare vuota; il tema,
+    che procede per grado, deve essere riconosciuto.
+    """
+    intro = [48, 55, 60, 64, 60, 55, 48, 55]
+    tema = [[(76, 1), (74, 1), (72, 1), (74, 1)],
+            [(76, 2), (72, 2)]]
+    righe = _intestazione("Intro senza melodia")
+    numero = 0
+    for i in range(2):
+        numero += 1
+        righe.append(f'    <measure number="{numero}">')
+        if numero == 1:
+            righe += _attributi()
+        righe += _nota(0, 4, 1, 1, pausa=True)
+        righe.append(f"      <backup><duration>{int(4 * DIV)}</duration></backup>")
+        for midi in intro:
+            righe += _nota(midi, 0.5, 2, 2)
+        righe.append("    </measure>")
+    for battuta in tema:
+        numero += 1
+        righe.append(f'    <measure number="{numero}">')
+        for midi, q in battuta:
+            righe += _nota(midi, q, 1, 1)
+        righe.append(f"      <backup><duration>{int(4 * DIV)}</duration></backup>")
+        for midi in intro:
+            righe += _nota(midi, 0.5, 2, 2)
+        righe.append("    </measure>")
+    righe += ["  </part>", "</score-partwise>"]
+    _scrivi(percorso, righe)
+    return percorso
+
+
+def melodia_arpeggiata(percorso):
+    """
+    Tema costruito su note dell'accordo (succede: fanfare, galoppi), nel
+    registro acuto. Non va scambiato per accompagnamento arpeggiato solo
+    perche' procede per salti.
+    """
+    tema = [[(69, 0.5), (64, 0.5), (69, 0.5), (72, 0.5),
+             (69, 0.5), (72, 0.5), (76, 1.0)],
+            [(76, 0.5), (72, 0.5), (77, 0.5), (76, 0.5),
+             (72, 0.5), (69, 0.5), (72, 1.0)]]
+    righe = _intestazione("Melodia arpeggiata")
+    numero = 0
+    for _giro in range(2):
+        for battuta in tema:
+            numero += 1
+            righe.append(f'    <measure number="{numero}">')
+            if numero == 1:
+                righe += _attributi()
+            for midi, q in battuta:
+                righe += _nota(midi, q, 1, 1)
+            righe.append(f"      <backup><duration>{int(4 * DIV)}</duration></backup>")
+            righe += _nota(45, 4, 2, 2)
+            righe.append("    </measure>")
+    righe += ["  </part>", "</score-partwise>"]
+    _scrivi(percorso, righe)
+    return percorso
+
+
+def sinistra_sotto_accordi(percorso):
+    """
+    Melodia alla mano SINISTRA con accordi ribattuti alla destra: la cima degli
+    accordi si muove anche lei, e senza accorgimenti viene scambiata per il
+    tema. E' il caso in cui la mano destra "sembra" cantare ma sta solo
+    accompagnando.
+    """
+    sinistra = [[(53, 0.5), (55, 0.5), (57, 0.5), (55, 0.5),
+                 (53, 0.5), (52, 0.5), (53, 1.0)],
+                [(55, 0.5), (57, 0.5), (59, 0.5), (57, 0.5),
+                 (55, 0.5), (53, 0.5), (52, 1.0)]]
+    accordi = [[65, 69, 72], [64, 67, 72]]
+    righe = _intestazione("Melodia sotto gli accordi")
+    numero = 0
+    for _giro in range(2):
+        for i in range(2):
+            numero += 1
+            righe.append(f'    <measure number="{numero}">')
+            if numero == 1:
+                righe += _attributi()
+            for _colpo in range(4):
+                for k, midi in enumerate(accordi[i]):
+                    righe += _nota(midi, 1, 1, 1, accordo=(k > 0))
+            righe.append(f"      <backup><duration>{int(4 * DIV)}</duration></backup>")
+            for midi, q in sinistra[i]:
+                righe += _nota(midi, q, 2, 2)
+            righe.append("    </measure>")
+    righe += ["  </part>", "</score-partwise>"]
+    _scrivi(percorso, righe)
+    return percorso
+
+
+def con_sigle_e_sei_ottavi(percorso):
+    """
+    Brano in 6/8 con accompagnamento arpeggiato in crome e le SIGLE accordali
+    gia' scritte nel file. Verifica due cose: che le sigle dell'originale
+    vengano usate invece di dedurne altre, e che l'accompagnamento segua le
+    crome del 6/8.
+    """
+    sigle = [("C", "major"), ("A", "minor"), ("F", "major"), ("G", "major")]
+    arpeggi = [[48, 55, 60, 64, 60, 55], [45, 52, 57, 60, 57, 52],
+               [41, 48, 53, 57, 53, 48], [43, 50, 55, 59, 55, 50]]
+    melodia = [[(72, 1.5), (74, 1.5)], [(72, 1.5), (69, 1.5)],
+               [(65, 1.5), (67, 1.5)], [(67, 3.0)]]
+    righe = _intestazione("Sigle e sei ottavi")
+    for i in range(4):
+        righe.append(f'    <measure number="{i + 1}">')
+        if i == 0:
+            righe += _attributi(num=6, den=8)
+        passo, tipo = sigle[i]
+        righe += ['      <harmony>',
+                  f'        <root><root-step>{passo}</root-step></root>',
+                  f'        <kind>{tipo}</kind>',
+                  '      </harmony>']
+        for midi, q in melodia[i]:
+            righe += _nota(midi, q, 1, 1)
+        righe.append(f"      <backup><duration>{int(3 * DIV)}</duration></backup>")
+        for midi in arpeggi[i]:
+            righe += _nota(midi, 0.5, 2, 2)
+        righe.append("    </measure>")
+    righe += ["  </part>", "</score-partwise>"]
+    _scrivi(percorso, righe)
+    return percorso
+
+
 def basso_ritmico(percorso):
     """
     Mano sinistra con una figurazione ritmica precisa (basso puntato + croma),
@@ -468,3 +629,8 @@ if __name__ == "__main__":
     print(sinistra_arpeggiata(os.path.join(qui, "sinistra_arpeggiata.xml")))
     print(con_seconda_voce(os.path.join(qui, "seconda_voce.xml")))
     print(con_inciso(os.path.join(qui, "inciso.xml")))
+    print(forma_di_canzone(os.path.join(qui, "canzone.xml")))
+    print(intro_senza_melodia(os.path.join(qui, "intro_senza_melodia.xml")))
+    print(melodia_arpeggiata(os.path.join(qui, "melodia_arpeggiata.xml")))
+    print(sinistra_sotto_accordi(os.path.join(qui, "sinistra_sotto_accordi.xml")))
+    print(con_sigle_e_sei_ottavi(os.path.join(qui, "sigle_sei_ottavi.xml")))

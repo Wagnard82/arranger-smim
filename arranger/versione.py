@@ -10,86 +10,126 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple
 
-VERSIONE = "0.2.0"
+VERSIONE = "0.3.0"
 DATA = "agosto 2026"
+PRECEDENTE = "0.2.0"
+
+# Marca temporale del pacchetto: serve a capire a colpo d'occhio QUALE copia
+# del progetto sta girando, quando ne esistono piu' d'una sul disco.
+COMPILATO = "25 agosto 2026 ore 11.40"
 
 # (titolo della sezione, [voci])
 NOVITA: List[Tuple[str, List[str]]] = [
-    ("Lettura dello spartito", [
-        "Battute parziali interne (levare di sezione, battute spezzate dopo un "
-        "ritornello) non vengono piu' gonfiate al metro pieno: prima da li' in "
-        "poi tutto l'arrangiamento slittava e il brano si allungava.",
-        "L'anacrusi si riconosce solo a inizio brano; una misura corta perche' "
-        "l'esportatore ha omesso le pause finali resta piena.",
-        "Tempi composti (6/8, 9/8, 12/8): il movimento e' la semiminima "
-        "puntata, e lo seguono armonia, basso, comping e percussioni.",
-        "Dinamiche e forcelle (crescendo / diminuendo) dell'originale vengono "
-        "lette e riportate su tutte le parti.",
-    ]),
-    ("Melodia", [
-        "La scelta fra voce superiore, inferiore e neutra e' ora fatta misura "
-        "per misura: la melodia viene seguita anche quando migra da una mano "
-        "all'altra per una sezione.",
-        "Un'unica ottava per l'intero blocco affidato a uno strumento: prima "
-        "ogni frase decideva per conto suo e alle giunzioni nascevano salti.",
+    ("Riconoscimento della melodia", [
+        "La linea melodica ora puo' TACERE: nelle introduzioni, negli "
+        "interludi e negli accompagnamenti arpeggiati non viene piu' promosso "
+        "a tema l'ostinato del basso.",
+        "Punto di partenza esplicito: la melodia sta di norma alla mano "
+        "destra. Se la destra tace, la linea grave diventa melodia solo se "
+        "canta davvero, cioe' se procede per grado.",
+        "La cima di una successione di accordi non e' una melodia: quando "
+        "sotto c'e' una linea che si muove, il tema e' quella.",
+        "Quando in una misura il tema sta a una mano, viene preso TUTTO: "
+        "prima il rilevatore poteva saltare un salto verso il basso, una "
+        "ripetizione o l'ultima croma della battuta.",
+        "Una nota che suona da sola non e' ne' voce superiore ne' inferiore: "
+        "prima veniva penalizzata lo stesso, e nei passaggi a una mano sola la "
+        "linea si riempiva di buchi.",
+        "Distinzione fra accompagnamento arpeggiato e melodia costruita su "
+        "note dell'accordo: conta il registro in cui sta, non solo il fatto "
+        "che proceda per salti.",
+        "Una melodia non oscilla fra due registri: i salti oltre l'ottava "
+        "costano molto di piu'.",
         "Estensioni degli strumenti corrette (il flauto partiva dal Do5 invece "
         "che dal Do4): mezze melodie venivano ribaltate d'ottava senza motivo.",
     ]),
-    ("Accompagnamento", [
-        "Il basso viene preso dall'originale con il suo ritmo, non piu' come "
-        "una nota per accordo. Va al violoncello o, se manca, allo strumento "
-        "piu' grave disponibile.",
-        "Dalla 2a media il pianoforte riproduce la mano sinistra scritta "
-        "nell'originale: arpeggi e figure ritmiche sopravvivono invece di "
-        "diventare una semibreve per battuta.",
-        "Gli accordi seguono il groove del brano (basso sul primo movimento, "
-        "accordo sul secondo) invece di stendersi sulla durata dell'armonia.",
-        "La chitarra non ribatte piu' l'accordo su ogni croma: al massimo un "
-        "attacco per movimento, e senza note doppie.",
+    ("Frasi, periodi e forma del brano", [
+        "Le frasi non si tagliano piu' ogni quattro battute: ogni stanghetta "
+        "riceve un punteggio da respiro, allungamento della nota finale, "
+        "cadenza armonica e metrica.",
+        "I confini si spostano poi sul respiro reale: un levare o una coda in "
+        "fondo alla battuta non viene piu' staccato dalla frase a cui "
+        "appartiene.",
+        "Le frasi si accorpano in periodi (antecedente + conseguente), e il "
+        "brano viene confrontato con se stesso per trovare le sezioni "
+        "ripetute: se una torna spesso, viene trattato come una canzone.",
+        "Lo scambio fra i solisti avviene solo sui confini: a fine periodo nei "
+        "brani classici, fra strofa e ritornello in quelli pop. Nel ritornello "
+        "i solisti vanno all'unisono.",
+        "Un solista tiene la melodia per almeno un numero minimo di misure "
+        "(8 di default, regolabile): scambi ravvicinati non danno il tempo di "
+        "riconoscere il timbro.",
     ]),
-    ("Voci interne e incisi", [
-        "Vengono riconosciute le seconde e terze voci e i contrappunti, cercati "
-        "dentro un solo rigo per volta e spezzati nei loro episodi.",
-        "Scale, volatine e riempimenti che non formano una voce continua "
-        "vengono raccolti e affidati agli strumenti che in quel punto tacciono "
-        "(o a chi sta solo riempiendo l'armonia). Precedenza ai monodici.",
-        "Chi ha una voce interna da suonare non si contende anche la melodia.",
+    ("Distribuzione degli strumenti", [
+        "Nuovo modulo di casting: i ruoli si decidono una volta sola guardando "
+        "il materiale del brano, non il nome dello strumento. Contano il "
+        "timbro, quante note ci stanno davvero in estensione e la difficolta' "
+        "rispetto al livello.",
+        "Un solista non accompagna piu' quando la melodia tace: sta zitto. "
+        "Solo con la staffetta attiva, nelle frasi cantate da altri, passa a "
+        "seconda voce o accompagnamento.",
+        "I solisti scelti dall'utente fanno soltanto melodia.",
+        "Il casting tiene da parte chi serve per basso, seconde voci e "
+        "accompagnamento: pianoforte e chitarra non vengono sottratti "
+        "all'armonia.",
+        "Un tratto di melodia nel registro grave va allo strumento che lo "
+        "suona com'e' scritto, se c'e'; altrimenti resta al solista, "
+        "trasposto d'ottava.",
+        "Nuova modalita' 'Orchestra i registri' per i brani puramente "
+        "pianistici, dove un tema da cantare non c'e': il tessuto "
+        "dell'originale viene diviso in fasce di altezza fra gli strumenti.",
+        "Il report elenca chi fa cosa e perche'.",
     ]),
-    ("Armonia", [
-        "Ritmo armonico molto piu' sobrio: su una sonatina di 89 battute si "
-        "passa da 236 accordi a 96, per il 93% triadi e settime di dominante.",
-        "Le note brevi pesano meno (sono figurazione, non armonia) e la "
-        "tonalita' viene stimata su finestra scorrevole, quindi le modulazioni "
-        "vengono seguite.",
+    ("Armonia e accompagnamento", [
+        "Se lo spartito porta gia' le SIGLE accordali, vengono usate quelle: "
+        "chi ha scritto il brano sa qual e' l'accordo, l'analisi lo indovina.",
+        "Nei tempi composti (6/8) il ritmo armonico e' piu' lento: si valuta "
+        "mezza misura per volta invece del singolo movimento, e il basso pesa "
+        "di piu' nel riconoscimento.",
+        "L'accompagnamento si aggancia al battere e non all'attacco della "
+        "melodia: se il tema entra in ritardo, l'accordo non lo segue.",
+        "In 6/8 l'accompagnamento arpeggiato va in crome, tre per movimento.",
+        "La chitarra e' trattata come strumento melodico: sigle sopra il rigo "
+        "e sul rigo una parte vera (melodia, seconda voce o arpeggio), mai "
+        "accordi a blocchi ribattuti.",
+        "Registri delle mani del pianoforte: la destra non scende sotto il Sol "
+        "sotto il pentagramma, la sinistra non sale sopra il Do5.",
+        "Le dinamiche si scrivono una volta per tratto, non su ogni nota.",
     ]),
-    ("Scrittura strumentale", [
-        "Le correzioni d'ottava lavorano sul tratto di frase, mai sulla singola "
-        "nota: le scale restano scale. Su una sonatina gli interventi "
-        "automatici scendono da 883 a 168.",
-        "Sugli strumenti a due righi la mano destra non scende sotto la "
-        "sinistra e non ne raddoppia le note.",
-        "Con la melodia a chitarra, glockenspiel, metallofono o violoncello "
-        "l'accompagnamento viene diradato: altrimenti il solista non si sente.",
-        "In 1a media le note alterate che appartengono all'armonia non vengono "
-        "piu' appiattite: una nota difficile e' meglio di una nota sbagliata.",
-    ]),
-    ("Interfaccia e strumenti", [
-        "Si sceglie a quali strumenti affidare la melodia.",
-        "Modalita' confronto: lo spartito originale viene accodato in fondo "
-        "alla partitura, per verificarlo battuta per battuta.",
-        "Export LilyPond (.ly) oltre a MusicXML e MIDI.",
-        "Modulo di feedback.",
+    ("Anteprima e interfaccia", [
+        "Anteprima nel browser: la partitura si guarda prima di scaricarla, "
+        "con un lettore MIDI per l'ascolto d'insieme e il numero di misure "
+        "regolabile.",
+        "Nel titolo compaiono versione, data e ora della build, e sotto il "
+        "percorso del file in esecuzione: con piu' copie del progetto sul "
+        "disco si capisce subito quale sta girando.",
+        "Si sceglie quando cambiare solista (frase, periodo, sezione) e dopo "
+        "quante misure.",
+        "Un test verifica che l'interfaccia contenga davvero i comandi delle "
+        "funzioni dichiarate: una modifica ad app.py puo' fallire in silenzio, "
+        "com'e' successo con l'anteprima della 0.2.",
     ]),
     ("Intelligenza artificiale (facoltativa)", [
-        "Arbitrato della melodia misura per misura sulle ipotesi del motore.",
-        "Stile e tipo di accompagnamento consigliati dal modello (stile "
-        "'Automatico'), con ricerca di informazioni sul brano originale.",
+        "Ogni funzione si attiva singolarmente: arbitrato della melodia, "
+        "stile e accompagnamento, ricerca sul brano originale, staffetta, "
+        "revisione delle sigle, relazione per il docente.",
+        "Scelta del modello (Haiku, Sonnet, Opus) e prova di connessione; la "
+        "chiave puo' stare nei segreti dell'istanza o essere incollata "
+        "dall'utente.",
         "Senza chiave API il risultato resta identico: l'IA non e' mai una "
         "dipendenza nascosta.",
     ]),
+    ("Sotto il cofano", [
+        "`strumenti_analisi.py`: banco di prova che, data una cartella di "
+        "spartiti, misura copertura della melodia, note alla mano sinistra, "
+        "salti d'ottava e ambito. Serve a capire se una modifica migliora le "
+        "cose su un repertorio vero e non su un brano solo.",
+        "La suite di test cresce a 235 verifiche, con esempi dedicati per ogni "
+        "caso difficile incontrato: melodia che migra fra le mani, "
+        "introduzioni senza tema, melodia sotto gli accordi, battute parziali, "
+        "tempi composti, sigle scritte nel file.",
+    ]),
 ]
-
-PRECEDENTE = "0.1.0"
 
 
 def riepilogo() -> Dict[str, int]:

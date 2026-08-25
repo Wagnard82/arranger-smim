@@ -20,21 +20,87 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .modello import Analisi, Configurazione, Partitura
 
 MODELLO_DEFAULT = "claude-sonnet-4-6"
 
 
-def disponibile() -> bool:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return False
+MODELLI = {
+    "Sonnet (equilibrato)": "claude-sonnet-4-6",
+    "Haiku (rapido ed economico)": "claude-haiku-4-5-20251001",
+    "Opus (piu' accurato)": "claude-opus-4-1",
+}
+
+FUNZIONI = {
+    "melodia": ("Arbitrato della melodia",
+                "Sottopone al modello, misura per misura, le linee candidate a "
+                "essere la melodia. E' il punto in cui le regole sbagliano di "
+                "piu': melodia che passa da una mano all'altra, voci "
+                "raddoppiate."),
+    "stile": ("Stile e accompagnamento",
+              "Fa proporre stile, tipo di accompagnamento, densita' e "
+              "andamento. Con lo stile su 'Automatico' la scelta viene "
+              "applicata."),
+    "riferimenti": ("Ricerca sul brano originale",
+                    "Cerca sul web genere, tempo, organico e struttura della "
+                    "versione piu' nota, e li passa alla funzione precedente. "
+                    "Piu' lenta: richiede una ricerca."),
+    "orchestrazione": ("Staffetta della melodia",
+                       "Fa decidere al modello quale strumento canta in ogni "
+                       "frase e dove mettere i climax."),
+    "armonia": ("Revisione delle sigle",
+                "Rivede gli accordi riconosciuti con bassa affidabilita' "
+                "secondo la logica tonale."),
+    "relazione": ("Relazione per il docente",
+                  "Riassume in italiano gli interventi del validatore: cosa e' "
+                  "stato semplificato e dove controllare a mano."),
+}
+
+
+def configura_chiave(chiave: Optional[str]) -> bool:
+    """Imposta la chiave API per questa sessione. Ritorna True se ora c'e'."""
+    if chiave:
+        os.environ["ANTHROPIC_API_KEY"] = chiave.strip()
+    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
+def libreria_presente() -> bool:
     try:
         import anthropic  # noqa: F401
+        return True
     except ImportError:
         return False
-    return True
+
+
+def stato() -> Dict[str, bool]:
+    """Diagnostica per l'interfaccia: cosa manca per usare l'IA."""
+    return {"libreria": libreria_presente(),
+            "chiave": bool(os.environ.get("ANTHROPIC_API_KEY"))}
+
+
+def prova_connessione(modello: str = MODELLO_DEFAULT) -> Tuple[bool, str]:
+    """Chiamata minima di verifica: conferma che chiave e modello funzionano."""
+    if not libreria_presente():
+        return False, "Manca il pacchetto anthropic (pip install anthropic)."
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return False, "Manca la chiave API."
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+        risp = client.messages.create(
+            model=modello, max_tokens=16,
+            messages=[{"role": "user", "content": "Rispondi solo: ok"}])
+        testo = "".join(b.text for b in risp.content
+                        if getattr(b, "type", "") == "text")
+        return True, f"Connessione riuscita ({modello}): {testo.strip()[:20]}"
+    except Exception as e:
+        return False, f"Connessione fallita: {e}"
+
+
+def disponibile() -> bool:
+    return libreria_presente() and bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
 def _chiama(prompt: str, sistema: str, modello: str = MODELLO_DEFAULT,
@@ -94,7 +160,7 @@ def melodia_per_misura(sp, ipotesi_per_misura: Dict[int, List[str]],
     `ipotesi_per_misura` = {numero_misura: ["Do5 Re5 Mi5", "Do3 Sol3 ...", ...]}
     Ritorna {numero_misura: indice_ipotesi}.
     """
-    if not cfg.usa_ia or not disponibile() or not ipotesi_per_misura:
+    if not cfg.ia_attiva("melodia") or not disponibile() or not ipotesi_per_misura:
         return None
     righe = []
     for numero in sorted(ipotesi_per_misura)[:80]:
@@ -133,7 +199,7 @@ def consiglia_arrangiamento(analisi: Analisi, cfg: Configurazione,
 
     Ritorna {"stile", "accompagnamento", "densita", "bpm", "motivazione"}.
     """
-    if not cfg.usa_ia or not disponibile():
+    if not cfg.ia_attiva("stile") or not disponibile():
         return None
     sistema = ("Sei un arrangiatore per orchestra scolastica (scuola media a "
                "indirizzo musicale). Rispondi SOLO con JSON valido.")
@@ -165,7 +231,7 @@ def riferimenti_web(titolo: str, cfg: Configurazione) -> Optional[str]:
     arrangiamento con una registrazione: si puo' solo raccogliere cio' che
     dell'originale e' stato scritto, e usarlo come indizio.
     """
-    if not cfg.usa_ia or not disponibile() or not titolo:
+    if not cfg.ia_attiva("riferimenti") or not disponibile() or not titolo:
         return None
     try:
         import anthropic
@@ -190,7 +256,7 @@ def riferimenti_web(titolo: str, cfg: Configurazione) -> Optional[str]:
 def piano_orchestrazione(analisi: Analisi, cfg: Configurazione, id_parti: List[str],
                          titolo: str = "") -> Optional[Dict[int, List[str]]]:
     """Chiede al modello chi porta la melodia in ogni frase. -> {frase: [id_parti]}"""
-    if not cfg.usa_ia or not disponibile():
+    if not cfg.ia_attiva("orchestrazione") or not disponibile():
         return None
     sistema = (
         "Sei un orchestratore esperto di didattica musicale nella scuola media a "
@@ -223,7 +289,7 @@ def piano_orchestrazione(analisi: Analisi, cfg: Configurazione, id_parti: List[s
 def revisiona_armonia(analisi: Analisi, cfg: Configurazione,
                       soglia: float = 0.25) -> Optional[Dict[int, str]]:
     """Rivede le sigle con confidenza bassa. -> {indice_accordo: nuova_sigla}"""
-    if not cfg.usa_ia or not disponibile():
+    if not cfg.ia_attiva("armonia") or not disponibile():
         return None
     dubbi = [(i, a) for i, a in enumerate(analisi.armonia) if a.confidenza < soglia]
     if not dubbi:
@@ -249,7 +315,7 @@ def revisiona_armonia(analisi: Analisi, cfg: Configurazione,
 
 def relazione_didattica(part: Partitura, cfg: Configurazione) -> Optional[str]:
     """Sintesi in italiano del report dei filtri, per il docente."""
-    if not cfg.usa_ia or not disponibile() or not part.report:
+    if not cfg.ia_attiva("relazione") or not disponibile() or not part.report:
         return None
     sistema = ("Sei un docente di strumento musicale nella scuola secondaria di primo "
                "grado. Scrivi in italiano, in modo pratico e sintetico.")

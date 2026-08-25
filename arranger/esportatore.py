@@ -260,7 +260,8 @@ class EsportatoreMusicXML:
             unita = _unita(e.durata)
             if unita <= 0:
                 continue
-            if parte.mostra_sigle and e.sigla and e.sigla != sigla_stampata and not e.pausa:
+            if parte.mostra_sigle and e.sigla and e.sigla != sigla_stampata \
+                    and not e.pausa:
                 r.extend(self._armonia(e.sigla, m.tonalita))
                 sigla_stampata = e.sigla
             if e.dinamica and not e.pausa:

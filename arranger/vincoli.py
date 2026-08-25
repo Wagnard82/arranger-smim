@@ -507,6 +507,41 @@ def filtro_incroci(part: Partitura) -> None:
                             f"fra le due mani -> tolte dalla destra.")
 
 
+# La destra non scende sotto il SOL sotto il pentagramma in chiave di violino
+# (Sol3), la sinistra non sale sopra il Do5: oltre quei limiti la scrittura si
+# riempie di tagli addizionali e le mani si accavallano.
+AMBITO_MANI = {1: (55, 96), 2: (28, 72)}
+
+
+def filtro_mani(part: Partitura) -> None:
+    """Tiene ogni mano del pianoforte nel proprio registro."""
+    for p in part.parti:
+        if p.righi != 2:
+            continue
+        for e in p.eventi:
+            if e.pausa:
+                continue
+            lo, hi = AMBITO_MANI.get(e.rigo, (21, 108))
+            nuove = []
+            fuori = False
+            for midi in e.altezze:
+                originale = midi
+                while midi < lo:
+                    midi += 12
+                while midi > hi:
+                    midi -= 12
+                if midi != originale:
+                    fuori = True
+                nuove.append(max(lo, min(hi, midi)))
+            if fuori:
+                part.report.append(
+                    f"[Mani] {p.nome}, mis. {_misura_di(part.misure, e.inizio)}: "
+                    f"nota fuori dal registro della mano "
+                    f"{'destra' if e.rigo == 1 else 'sinistra'} -> riportata "
+                    f"nell'ottava giusta.")
+            e.altezze = sorted(set(nuove))
+
+
 def valida(part: Partitura) -> List[str]:
     """Esegue tutti i filtri nell'ordine corretto e restituisce il report."""
     filtro_polifonia(part)
@@ -514,6 +549,7 @@ def valida(part: Partitura) -> List[str]:
     filtro_alterazioni(part)
     filtro_salti(part)
     filtro_idiomatico(part)
+    filtro_mani(part)
     filtro_incroci(part)
     filtro_estensione(part)     # secondo passaggio dopo le modifiche idiomatiche
     filtro_ritmico(part)

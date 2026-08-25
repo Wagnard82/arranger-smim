@@ -14,7 +14,10 @@ import random
 from typing import Dict, List, Optional, Tuple
 
 from .modello import (Accordo, Analisi, Configurazione, Evento, Misura, Nota,
-                      Parte, Partitura, Spartito)
+                      Parte, Partitura, Spartito, nome_it)
+from .distribuzione import assegna as assegna_ruoli_stabili
+from .distribuzione import (copertura, migliore_per_frase, solista_per_registro,
+                            solisti_ordinati)
 from .strumenti import (ORDINE_PARTITURA, PERC_MIDI, Strumento, livello,
                         nomi_parti, strumento)
 
@@ -138,97 +141,122 @@ def costruisci_parti(cfg: Configurazione) -> List[Parte]:
     return parti
 
 
-def assegna_ruoli(parti: List[Parte], stile: str, livello_didattico: str = "1a Media"
-                  ) -> None:
-    """Assegna il ruolo di base a ogni parte secondo il template di stile."""
-    famiglia_idx: Dict[str, int] = {}
-    for p in parti:
-        st = strumento(p.strumento)
-        k = famiglia_idx.get(p.strumento, 0)
-        famiglia_idx[p.strumento] = k + 1
-
-        if p.strumento in ("flauto",):
-            p.ruolo = "melodia" if k == 0 else ("controcanto" if k == 1 else "armonia")
-        elif p.strumento == "violino":
-            p.ruolo = "melodia" if k == 0 else ("controcanto" if k == 1 else "armonia")
-        elif p.strumento in ("clarinetto", "sax"):
-            p.ruolo = "controcanto" if k == 0 else "armonia"
-        elif p.strumento == "tromba":
-            p.ruolo = "controcanto" if stile != "Jazz" else "melodia"
-        elif p.strumento == "violoncello":
-            p.ruolo = "basso" if k == 0 else "armonia"
-        elif p.strumento == "chitarra":
-            # Chitarra 1 accompagna, Chitarra 2 porta melodia/controcanto
-            p.ruolo = "armonia" if k == 0 else ("melodia" if k == 1 else "controcanto")
-        elif p.strumento == "pianoforte":
-            # Pianoforte 1 accompagna, Pianoforte 2 fa una parte propria:
-            # senza questo, i due pianoforti suonerebbero la stessa identica cosa
-            p.ruolo = "armonia" if k == 0 else ("melodia" if k == 1 else "controcanto")
-        elif p.strumento in ("glockenspiel", "metallofono"):
-            p.ruolo = "controcanto" if k == 0 else "armonia"
-        elif p.strumento == "percussioni":
-            p.ruolo = "ritmo"
-
-    # se non c'e' il violoncello, il basso va comunque affidato: prende la
-    # linea grave lo strumento con l'estensione piu' bassa fra quelli presenti
-    if not any(p.ruolo == "basso" for p in parti):
-        candidati = [p for p in parti
-                     if not strumento(p.strumento).percussione
-                     and "basso" in strumento(p.strumento).ruoli
-                     and p.ruolo != "melodia"]
-        if candidati:
-            piu_grave = min(candidati,
-                            key=lambda p: strumento(p.strumento).ambito(
-                                livello_didattico)[0])
-            piu_grave.ruolo = "basso"
-
-
 # --------------------------------------------------------------------------
 # Staffetta della melodia
 # --------------------------------------------------------------------------
 
 
-def pianifica_staffetta(parti: List[Parte], analisi: Analisi,
-                        cfg: Configurazione,
-                        escludi: Optional[set] = None) -> Dict[int, List[str]]:
+def unita_di_scambio(analisi: Analisi, cfg: Configurazione,
+                     misure: Optional[List[Misura]] = None
+                     ) -> Tuple[List[Tuple[float, float]], str]:
     """
-    Per ogni frase decide QUALI parti portano la melodia.
-    Restituisce {indice_frase: [id_parte, ...]} (il primo e' il solista).
+    Dove puo' avvenire lo scambio fra i solisti.
+
+    Non a caso e non ogni quattro battute: alla fine di una frase, meglio se
+    alla fine di un periodo. Nei brani con struttura di canzone si cambia fra
+    una sezione e l'altra, cosi' la strofa resta di chi l'ha cominciata.
     """
-    if cfg.strumenti_melodia:
-        # scelta esplicita dell'utente: comanda quella
-        candidati = [p for p in parti if p.id in cfg.strumenti_melodia]
+    scelta = cfg.cambio_solista
+    if scelta == "auto":
+        scelta = "sezione" if analisi.forma == "pop" else "periodo"
+    if scelta == "sezione" and analisi.sezioni:
+        unita, tipo = [(a, b) for (a, b, _e) in analisi.sezioni], "sezione"
+    elif scelta in ("sezione", "periodo") and analisi.periodi:
+        unita, tipo = list(analisi.periodi), "periodo"
     else:
-        candidati = [p for p in parti
-                     if "melodia" in strumento(p.strumento).ruoli
-                     and p.strumento not in ("percussioni",)
-                     and (p.ruolo in ("melodia", "controcanto")
-                          or p.strumento in ("flauto", "violino", "clarinetto",
-                                             "tromba", "sax", "glockenspiel",
-                                             "metallofono"))]
-    if escludi and not cfg.strumenti_melodia:
-        rimasti = [p for p in candidati if p.id not in escludi]
-        if rimasti:
-            candidati = rimasti
-    if not candidati:
-        candidati = [p for p in parti if not strumento(p.strumento).percussione][:1]
+        unita, tipo = list(analisi.frasi), "frase"
+    return _accorpa_brevi(unita, cfg, misure), tipo
 
-    principali = [p for p in candidati if p.ruolo == "melodia"] or candidati[:1]
-    piano: Dict[int, List[str]] = {}
-    n_frasi = max(1, len(analisi.frasi))
 
-    for i in range(n_frasi):
-        if cfg.staffetta_melodia and len(candidati) > 1:
-            solista = candidati[i % len(candidati)]
+def _accorpa_brevi(unita: List[Tuple[float, float]], cfg: Configurazione,
+                   misure: List[Misura]) -> List[Tuple[float, float]]:
+    """
+    Unisce le unita' troppo corte finche' non durano almeno
+    `cfg.misure_minime_solista` misure: cambiare solista ogni due battute fa
+    solo confusione, e nessuno fa in tempo a riconoscere il timbro.
+    """
+    if not unita or cfg.misure_minime_solista <= 0:
+        return unita
+    durata_misura = misure[0].durata_piena if misure else 4.0
+    minimo = cfg.misure_minime_solista * durata_misura
+    fuori: List[List[float]] = []
+    for (a, b) in unita:
+        if fuori and (fuori[-1][1] - fuori[-1][0]) < minimo - 1e-6:
+            fuori[-1][1] = b
         else:
-            solista = principali[0]
-        squadra = [solista.id]
-        if cfg.raddoppi_melodia:
-            for p in principali:
-                if p.id != solista.id and p.id not in squadra:
+            fuori.append([a, b])
+    if len(fuori) > 1 and (fuori[-1][1] - fuori[-1][0]) < minimo * 0.5:
+        fuori[-2][1] = fuori[-1][1]
+        fuori.pop()
+    return [(a, b) for a, b in fuori]
+
+
+def pianifica_staffetta(parti: List[Parte], analisi: Analisi,
+                        cfg: Configurazione, tonalita: int = 0,
+                        climax: Optional[set] = None,
+                        misure_partitura: Optional[List[Misura]] = None
+                        ) -> Dict[int, List[str]]:
+    """
+    Per ogni FRASE decide quali parti portano la melodia, ma i cambi di solista
+    avvengono solo sui confini dell'unita' di scambio (periodo o sezione):
+    dentro un periodo la melodia non cambia mano.
+
+    Nei ritornelli di un brano pop tutti i solisti suonano all'unisono: e' il
+    momento in cui l'unisono ha senso.
+    """
+    solisti = solisti_ordinati(parti, analisi, cfg, tonalita)
+    if not solisti:
+        residuo = [p for p in parti if not strumento(p.strumento).percussione]
+        solisti = residuo[:1]
+    if not solisti:
+        return {}
+
+    climax = climax or set()
+    frasi = analisi.frasi or [(0.0, 0.0)]
+    unita, _tipo = unita_di_scambio(analisi, cfg, misure_partitura)
+    unita = unita or frasi
+
+    def indice_unita(inizio: float) -> int:
+        for k, (a, b) in enumerate(unita):
+            if a - 1e-6 <= inizio < b - 1e-6:
+                return k
+        return len(unita) - 1
+
+    piano: Dict[int, List[str]] = {}
+    for i, (a, b) in enumerate(frasi):
+        note = [n for n in analisi.melodia if a - 1e-6 <= n.inizio < b - 1e-6]
+        k = indice_unita(a)
+        if cfg.staffetta_melodia and len(solisti) > 1:
+            turno = solisti[k % len(solisti)]
+            capo = turno
+            if note:
+                dentro, _ = copertura(strumento(turno.strumento), note, cfg.livello)
+                if dentro < 0.7:
+                    # tratto scomodo per chi tocca: prima si cerca chi lo suona
+                    # al registro scritto (tipico dei passaggi alla mano
+                    # sinistra), poi si ripiega sul piu' adatto in assoluto -
+                    # che lo cantera' trasposto d'ottava
+                    capo = (solista_per_registro(solisti, note, cfg.livello,
+                                                 tonalita)
+                            or migliore_per_frase(solisti, note, cfg.livello,
+                                                  tonalita) or turno)
+        else:
+            capo = migliore_per_frase(solisti, note, cfg.livello, tonalita) \
+                or solisti[0]
+
+        in_ritornello = any(x - 1e-6 <= a < y - 1e-6
+                            for (x, y) in analisi.ritornelli)
+        if in_ritornello and len(solisti) > 1:
+            piano[i] = [p.id for p in solisti]      # unisono nel ritornello
+            continue
+
+        squadra = [capo.id]
+        if cfg.raddoppi_melodia and (not cfg.staffetta_melodia
+                                     or len(solisti) < 2 or i in climax):
+            for p in solisti:
+                if p.id not in squadra:
                     squadra.append(p.id)
                     break
-            # il glockenspiel raddoppia nei climax (stile cinematico)
         piano[i] = squadra
     return piano
 
@@ -633,14 +661,18 @@ def dirada_ritmo(ritmo: List[Tuple[float, float]], misure: List[Misura],
     if not ritmo or not misure:
         return ritmo
     passo = misure[0].unita_movimento / max(1, per_movimento)
+    inizio_brano = misure[0].inizio
     tenuti: List[Tuple[float, float]] = []
     ultimo = None
     for (t, durata) in ritmo:
-        cella = round(t / passo)
+        cella = round((t - inizio_brano) / passo)
         if cella == ultimo:
             continue
         ultimo = cella
-        tenuti.append((t, durata))
+        # l'attacco si aggancia al BATTERE della cella: se la melodia entra in
+        # ritardo (sincope, appoggiatura) l'accordo non deve seguirla, o
+        # l'accompagnamento suona sistematicamente in ritardo
+        tenuti.append((inizio_brano + cella * passo, durata))
     fuori: List[Tuple[float, float]] = []
     for i, (t, _d) in enumerate(tenuti):
         fine = tenuti[i + 1][0] if i + 1 < len(tenuti) else t + passo
@@ -661,6 +693,7 @@ def accordi_su_ritmo(analisi: Analisi, st: Strumento, liv: str,
     n_note = min(L.accordi_max, st.polifonia_max, 4)
     ev: List[Evento] = []
     passo = 0
+    ultima_sigla: Optional[str] = None
     for (t, durata) in ritmo:
         acc = _accordo_a(analisi.armonia, t)
         if acc is None or durata <= 1e-6:
@@ -669,8 +702,13 @@ def accordi_su_ritmo(analisi: Analisi, st: Strumento, liv: str,
         if not note:
             continue
         if arpeggia:
+            # la sigla si stampa al cambio d'accordo: sopra il rigo resta la
+            # griglia, sul rigo la linea
+            cambio = (ultima_sigla != acc.sigla())
             ev.append(Evento(inizio=t, durata=durata,
-                             altezze=[note[passo % len(note)]]))
+                             altezze=[note[passo % len(note)]],
+                             sigla=acc.sigla() if cambio else None))
+            ultima_sigla = acc.sigla()
             passo += 1
         else:
             ev.append(Evento(inizio=t, durata=durata, altezze=note,
@@ -843,10 +881,82 @@ def pattern_percussioni(stile: str, liv: str, misure: List[Misura],
 # --------------------------------------------------------------------------
 
 
+def orchestra_tessitura(sp: Spartito, analisi: Analisi, parti: List[Parte],
+                        cfg: Configurazione, misure: List[Misura]) -> List[str]:
+    """
+    Orchestrazione per REGISTRI, senza separare melodia e accompagnamento.
+
+    In molta musica pianistica - Debussy, la musica d'atmosfera, certi studi -
+    non c'e' un tema da affidare a un solista: c'e' una tessitura. Cercare a
+    tutti i costi una melodia produce un solista che canta l'arpeggio e un
+    accompagnamento inventato. Qui invece il tessuto originale viene diviso in
+    fasce di registro e ogni fascia va allo strumento che ci sta dentro, con la
+    scrittura dell'originale.
+    """
+    resoconto: List[str] = []
+    candidati = [p for p in parti if not strumento(p.strumento).percussione]
+    if not candidati or not sp.note:
+        return resoconto
+
+    altezze = sorted(n.midi for n in sp.note)
+    # gli strumenti si dispongono dal grave all'acuto secondo il loro ambito
+    candidati.sort(key=lambda p: sum(strumento(p.strumento).ambito(cfg.livello)))
+    fasce: List[Tuple[Parte, int, int]] = []
+    n = len(candidati)
+    for i, p in enumerate(candidati):
+        basso = altezze[int(len(altezze) * i / n)]
+        alto = altezze[min(len(altezze) - 1, int(len(altezze) * (i + 1) / n))]
+        lo, hi = strumento(p.strumento).ambito(cfg.livello)
+        fasce.append((p, max(basso - 2, lo - 12), min(alto + 2, hi + 12)))
+
+    inizio = misure[0].inizio if misure else 0.0
+    fine = sp.durata_totale
+    for (p, basso, alto) in fasce:
+        st = strumento(p.strumento)
+        if p.righi == 2:
+            # il pianoforte tiene la parte originale, com'e' scritta
+            for rigo in (1, 2):
+                note = [x for x in sp.note if x.rigo == rigo]
+                p.eventi.extend(_riempi_pause(
+                    riproduci_figurazione(note, st, cfg.livello, misure,
+                                          max_note=3, rigo=rigo,
+                                          mantieni_ottave=True),
+                    inizio, fine, rigo))
+            p.ruolo = "tessitura"
+            resoconto.append(f"[Tessitura] {p.nome}: parte pianistica originale.")
+            continue
+
+        note = [x for x in sp.note if basso <= x.midi <= alto]
+        if not note:
+            p.eventi = _riempi_pause([], inizio, fine)
+            continue
+        eventi = riproduci_figurazione(note, st, cfg.livello, misure,
+                                       max_note=st.polifonia_max, rigo=1)
+        if st.monofonico:
+            for e in eventi:
+                if e.altezze:
+                    e.altezze = [max(e.altezze)]
+        p.eventi = _riempi_pause(eventi, inizio, fine)
+        p.ruolo = "tessitura"
+        if p.strumento == "chitarra":
+            p.mostra_sigle = True
+        resoconto.append(
+            f"[Tessitura] {p.nome}: fascia {nome_it(basso)}-{nome_it(alto)}.")
+
+    for p in parti:
+        if strumento(p.strumento).percussione:
+            p.eventi = _riempi_pause(
+                pattern_percussioni(cfg.stile, cfg.livello, misure, analisi.groove),
+                inizio, fine)
+            p.ruolo = "ritmo"
+    return resoconto
+
+
 def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
              piano_melodia: Optional[Dict[int, List[str]]] = None) -> Partitura:
     parti = costruisci_parti(cfg)
-    assegna_ruoli(parti, cfg.stile, cfg.livello)
+    tonalita = misure[0].tonalita if (misure := sp.misure) else 0
+    resoconto_ruoli = assegna_ruoli_stabili(parti, analisi, cfg, tonalita)
     L = livello(cfg.livello)
     misure = sp.misure
     inizio = misure[0].inizio if misure else 0.0
@@ -874,7 +984,7 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                 voci_assegnate[p_c.id] = analisi.voci_interne[i]
 
     staffetta = piano_melodia or pianifica_staffetta(
-        parti, analisi, cfg, escludi=set(voci_assegnate))
+        parti, analisi, cfg, tonalita, set(_climax(analisi)), misure)
     if piano_melodia:
         for ids in piano_melodia.values():
             for i in ids:
@@ -888,7 +998,19 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                      bpm=sp.bpm, stile=cfg.stile, livello=cfg.livello,
                      swing=(cfg.stile == "Jazz"), parti=parti,
                      armonia=list(analisi.armonia))
-    part.sottotitolo = f"Arrangiamento per orchestra scolastica - {cfg.livello} - stile {cfg.stile}"
+    part.sottotitolo = (f"Arrangiamento per orchestra scolastica - "
+                        f"{cfg.livello} - stile {cfg.stile}")
+
+    tessitura = (cfg.modo == "tessitura"
+                 or (cfg.modo == "auto" and not analisi.melodia_affidabile))
+    if tessitura:
+        part.report.extend(orchestra_tessitura(sp, analisi, parti, cfg, misure))
+        for p in parti:
+            applica_dinamiche(p, sp.dinamiche, sp.gradazioni)
+        part.report.append(
+            "[Tessitura] Brano orchestrato per registri: non e' stata cercata "
+            "una melodia da affidare a un solista.")
+        return part
 
     for p in parti:
         st = strumento(p.strumento)
@@ -924,7 +1046,16 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
         coperto = _copertura(ev)
 
         # ---------------------------------------------------- ruolo di base
-        vuoti = _intervalli_liberi(coperto, inizio, fine, minimo=1.0)
+        # Un solista NON riempie i vuoti con l'accompagnamento: quando la
+        # melodia tace, tace anche lui. Solo con la staffetta attiva, nelle
+        # frasi cantate da altri, passa a seconda voce o accompagnamento.
+        solista_puro = p.ruolo == "melodia" and (
+            not cfg.staffetta_melodia
+            or p.id in (cfg.strumenti_melodia or []))
+        if solista_puro:
+            vuoti = []
+        else:
+            vuoti = _intervalli_liberi(coperto, inizio, fine, minimo=1.0)
         for (a, b) in vuoti:
             sotto = _sotto_analisi(analisi, a, b)
             mis_sub = [m for m in misure if m.inizio >= a - 1e-6 and m.fine <= b + 1e-6]
@@ -941,29 +1072,26 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                     ev.extend(linea_basso(sotto, st, cfg.livello))
 
             elif p.strumento == "chitarra":
+                # La chitarra si tratta come strumento MELODICO: sopra il rigo
+                # vanno le sigle, sul rigo una parte vera (melodia, seconda
+                # voce o accompagnamento arpeggiato). Gli accordi a blocchi li
+                # legge dalle sigle chi accompagna, non servono in partitura.
                 p.mostra_sigle = True
-                if cfg.stile == "Jazz":
-                    ev.extend(comping_chitarra(sotto, st, cfg.livello, mis_sub, swing=True))
-                elif cfg.livello == "1a Media":
-                    # solo sigle + bicordi (fondamentale + quinta)
-                    for acc in sotto.armonia:
-                        note = voicing(acc, 40, 64, n_note=2)
-                        ev.append(Evento(inizio=acc.inizio, durata=acc.durata,
-                                         altezze=note, sigla=acc.sigla()))
-                elif usa_figurazione and ritmo_figurazione(analisi.figurazione, a, b):
-                    ev.extend(accordi_su_ritmo(
-                        sotto, st, cfg.livello,
-                        dirada_ritmo(ritmo_figurazione(analisi.figurazione, a, b),
-                                     mis_sub, per_movimento=1),
-                        arpeggia=(p.variante % 2 == 1)))
-                elif p.variante % 2 == 1:
-                    # la seconda chitarra arpeggia invece di raddoppiare i blocchi
-                    arp = arpeggio(sotto, st, cfg.livello, passo=0.5)
-                    for e in arp:
-                        e.sigla = None
-                    ev.extend(arp)
+                # nei tempi composti l'accompagnamento arpeggiato va in crome
+                # (tre per movimento): diradare a meta' movimento produce un
+                # ritmo che con il 6/8 non c'entra nulla
+                composto = bool(mis_sub) and mis_sub[0].composto
+                ritmo_ch = dirada_ritmo(
+                    ritmo_figurazione(analisi.figurazione, a, b), mis_sub,
+                    per_movimento=3 if composto else 2)
+                if usa_figurazione and ritmo_ch:
+                    ev.extend(accordi_su_ritmo(sotto, st, cfg.livello, ritmo_ch,
+                                               arpeggia=True))
                 else:
-                    ev.extend(accordi_a_blocchi(sotto, st, cfg.livello, analisi.groove, mis_sub))
+                    passo_arp = 1.0 if cfg.livello == "1a Media" else 0.5
+                    if mis_sub and mis_sub[0].composto:
+                        passo_arp = 1.5 if cfg.livello == "1a Media" else 0.5
+                    ev.extend(arpeggio(sotto, st, cfg.livello, passo=passo_arp))
 
             elif p.strumento == "pianoforte":
                 ritmo = ritmo_figurazione(analisi.figurazione, a, b)
@@ -1081,6 +1209,7 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                                                   cfg.livello, misure))
 
     part.report.extend(alleggerisci_per_solista(part, analisi))
+    part.report.extend(resoconto_ruoli)
 
     return part
 
@@ -1171,12 +1300,13 @@ def alleggerisci_per_solista(part: Partitura, analisi: Analisi) -> List[str]:
         if not tratti:
             continue
         for (a, b) in tratti:
-            for e in solista.eventi:
-                if not e.pausa and a - 1e-6 <= e.inizio < b - 1e-6:
-                    e.dinamica = e.dinamica or "mf"
+            primo = next((e for e in solista.eventi
+                          if not e.pausa and a - 1e-6 <= e.inizio < b - 1e-6), None)
+            if primo is not None and not primo.dinamica:
+                primo.dinamica = "mf"
             for p in part.parti:
-                if p is solista:
-                    continue
+                if p is solista or p.ruolo == "melodia":
+                    continue      # gli altri solisti raddoppiano: e' voluto
                 _dirada_parte(p, a, b, attacchi_melodia)
         note_report.append(
             f"[Solista] {solista.nome}: accompagnamento alleggerito nei tratti "
@@ -1222,9 +1352,14 @@ def _dirada_parte(p: Parte, a: float, b: float,
                 continue
         if len(e.altezze) > 2:
             e.altezze = [e.altezze[0], e.altezze[-1]]
-        e.dinamica = "p"
         nuovi.append(e)
     p.eventi = nuovi
+    # un solo segno all'inizio del tratto: una dinamica su ogni nota rende la
+    # partitura illeggibile
+    primo = next((e for e in nuovi
+                  if not e.pausa and a - 1e-6 <= e.inizio < b - 1e-6), None)
+    if primo is not None:
+        primo.dinamica = "p"
 
 
 def distribuisci_frammenti(parti: List[Parte], frammenti: List[List[Nota]],

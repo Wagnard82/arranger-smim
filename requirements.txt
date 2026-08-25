@@ -6,4 +6,5 @@
 streamlit>=1.32
 
 # --- Strato IA (facoltativo) -----------------------------------------------
-# anthropic>=0.40.0
+# Serve solo se vuoi le funzioni IA. Senza, l'app funziona con le sue regole.
+anthropic>=0.40.0

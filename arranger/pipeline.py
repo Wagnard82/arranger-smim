@@ -46,8 +46,10 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
     note_ia: List[str] = []
     riferimenti = None
     if cfg.usa_ia and ia.disponibile():
+        # ogni blocco controlla da se' il proprio interruttore (cfg.ia_*)
         # 1) la melodia: si sottopongono al modello le ipotesi misura per misura
-        ipotesi, scelta = analizzatore.ipotesi_melodiche(master)
+        ipotesi, scelta = (analizzatore.ipotesi_melodiche(master)
+                           if cfg.ia_melodia else ([], []))
         if ipotesi and scelta:
             per_misura = {}
             for i, m in enumerate(master.misure):
@@ -102,7 +104,7 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
 
     # --- Modulo 3.2 / 3.3
     piano = None
-    if cfg.usa_ia and ia.disponibile():
+    if cfg.ia_attiva("orchestrazione") and ia.disponibile():
         parti_prev = orchestratore.costruisci_parti(cfg)
         piano = ia.piano_orchestrazione(analisi, cfg, [p.id for p in parti_prev],
                                         master.titolo)
@@ -137,7 +139,7 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
             except RuntimeError as e:
                 report.append(f"[Incisione] PDF non generato: {e}")
 
-    relazione = ia.relazione_didattica(partitura, cfg) if cfg.usa_ia else None
+    relazione = ia.relazione_didattica(partitura, cfg)
 
     return Risultato(master=master, analisi=analisi, partitura=partitura,
                      percorso_xml=xml_path, percorso_midi=midi_path,

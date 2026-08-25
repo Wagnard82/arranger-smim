@@ -222,6 +222,7 @@ def da_musicxml(percorso: str) -> Spartito:
     tutte: List[Nota] = []
     dinamiche: List[Tuple[float, str]] = []
     forcelle: List[Tuple[float, float, str]] = []
+    sigle: List[Tuple[float, int, str, Optional[int]]] = []
     aperta: Optional[Tuple[float, str]] = None
 
     for idx_parte, parte in enumerate(parti):
@@ -241,6 +242,11 @@ def da_musicxml(percorso: str) -> Spartito:
 
             for el in list(mis):
                 t = _tag(el)
+                if t == "harmony" and idx_parte == 0:
+                    letta = _sigla(el)
+                    if letta:
+                        sigle.append((offset_misura + cursore, letta[0],
+                                      letta[1], letta[2]))
                 if t == "direction" and idx_parte == 0:
                     din = _dinamica(el)
                     if din:
@@ -303,10 +309,45 @@ def da_musicxml(percorso: str) -> Spartito:
         forcelle.append((aperta[0], misure[-1].fine, aperta[1]))
     sp.dinamiche = sorted(set(dinamiche))
     sp.gradazioni = sorted(set(forcelle))
+    sp.sigle = sorted(set(sigle))
     sp.anacrusi = misure[0].durata if misure and misure[0].anacrusi else 0.0
     sp.ordina()
     _unisci_legature(sp)
     return sp
+
+
+# <kind> del MusicXML -> qualita' interna
+KIND_QUALITA = {
+    "major": "maj", "minor": "min", "dominant": "dom7", "minor-seventh": "min7",
+    "major-seventh": "maj7", "diminished": "dim", "augmented": "aug",
+    "suspended-fourth": "sus4", "major-sixth": "6", "minor-sixth": "m6",
+    "diminished-seventh": "dim7", "half-diminished": "m7b5",
+    "dominant-seventh": "dom7", "major-minor": "min", "power": "maj",
+    "suspended-second": "sus4", "major-ninth": "maj7", "dominant-ninth": "dom7",
+    "minor-ninth": "min7",
+}
+PASSI_PC = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+
+
+def _sigla(direzione: ET.Element) -> Optional[Tuple[int, str, Optional[int]]]:
+    """Legge un elemento <harmony>: (fondamentale, qualita', basso)."""
+    root = direzione.find("./{*}root")
+    if root is None:
+        return None
+    passo = _testo(root.find("./{*}root-step"))
+    if passo not in PASSI_PC:
+        return None
+    pc = PASSI_PC[passo] + int(float(_testo(root.find("./{*}root-alter"), "0")))
+    kind = _testo(direzione.find("./{*}kind")).strip().lower()
+    qualita = KIND_QUALITA.get(kind, "maj")
+    basso = None
+    b = direzione.find("./{*}bass")
+    if b is not None:
+        passo_b = _testo(b.find("./{*}bass-step"))
+        if passo_b in PASSI_PC:
+            basso = (PASSI_PC[passo_b]
+                     + int(float(_testo(b.find("./{*}bass-alter"), "0")))) % 12
+    return pc % 12, qualita, basso
 
 
 DINAMICHE_NOTE = ("pppp", "ppp", "pp", "p", "mp", "mf", "f", "ff", "fff", "ffff",
