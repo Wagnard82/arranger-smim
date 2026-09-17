@@ -1,6 +1,6 @@
 # Arranger SMIM
 
-**Versione 0.3.0.** Il registro delle modifiche vive in `arranger/versione.py`
+**Versione 0.7.2.** Il registro delle modifiche vive in `arranger/versione.py`
 (`VERSIONE`, `NOVITA`) ed e' mostrato dall'interfaccia in una colonna a destra:
 chi prova una versione nuova deve sapere che cosa e' cambiato senza andarlo a
 cercare. La stessa versione finisce nel tag `<software>` del MusicXML e nel
@@ -39,6 +39,48 @@ python esempi/genera_esempi.py
 python tests/test_pipeline.py
 ```
 
+**Riepilogo dei pacchetti**, dal minimo al completo:
+
+| Cosa serve | Comando | Per cosa |
+|---|---|---|
+| Nulla | — | motore, CLI, export MusicXML/MIDI/LilyPond: tutto sulla libreria standard |
+| Interfaccia | `pip install streamlit` | l'app web |
+| IA | `pip install anthropic` | arbitrato della melodia, stile consigliato, ricerca sul brano |
+| Frasi avanzate | `pip install music21` | legature, corone, respiri, articolazioni |
+| **Audio multitraccia** | `pip install demucs basic-pitch librosa` | importare da una registrazione: separazione voce/basso/batteria/resto |
+| Tempo piu' preciso | `beat_this` (vedi sotto) | rilevamento del tempo robusto sui ritmi sincopati (senza, si usa librosa) |
+
+L'ultima riga e' quella piu' pesante: **Demucs installa anche PyTorch**, quindi
+alcune centinaia di MB e qualche minuto di download. Su un servizio remoto
+senza GPU la separazione di un brano di 3-4 minuti richiede a sua volta
+qualche minuto di calcolo su CPU — e' normale, non e' bloccato. `librosa` e'
+facoltativo anche fra i facoltativi: senza, la batteria non viene trascritta
+ma voce, basso e resto funzionano lo stesso.
+
+`beat_this` e' facoltativo allo stesso modo e riguarda solo il **rilevamento
+del tempo**. librosa stima il tempo cercando ogni quanto il segnale si ripete:
+sui brani dal ritmo sincopato puo' agganciarsi a una suddivisione sbagliata, e
+siccome tutta la quantizzazione poggia sul tempo, sbagliarlo sposta ogni nota
+dell'arrangiamento — su *Shape of You* librosa stimava 129 bpm contro i ~96
+reali. `beat_this` (ISMIR 2024) e' una rete neurale addestrata a riconoscere
+direttamente battiti e battere: sullo stesso brano stima 95.6 bpm, riconosce il
+4/4 e colloca il primo battere dopo l'introduzione rumorosa. Non e' su PyPI:
+
+```bash
+pip install tqdm einops soxr rotary-embedding-torch
+pip install https://github.com/CPJKU/beat_this/archive/main.zip
+```
+
+Si appoggia a PyTorch, che Demucs ha gia' installato: in pratica non aggiunge
+peso. Se non e' installato si torna automaticamente a librosa — il caso
+peggiore e' il comportamento di prima, mai un errore in piu' — e il report dice
+sempre quale motore ha prodotto la stima e, in caso di ripiego, perche'.
+
+> **Nota su madmom.** Era la scelta storica per questo compito ed e' stata
+> valutata: la versione su PyPI regge solo Python < 3.10 e numpy < 1.20, e su
+> Python 3.12 non si installa senza forzature. Gli autori stessi, con
+> `beat_this`, sono andati oltre quell'impianto.
+
 **Il nucleo non ha dipendenze esterne**: parser MusicXML, parser MIDI, analisi,
 arrangiamento, validazione ed export sono scritti sulla libreria standard. Ne
 consegue che gira su Windows 10 senza toolchain di compilazione e resta
@@ -53,8 +95,10 @@ viene gestita nativamente).
 arranger/
   modello.py        modello dati interno (Nota, Misura, Spartito, Accordo,
                     Evento, Parte, Partitura, Configurazione)
-  ingestione.py     MODULO 1 - MusicXML/MXL, MIDI, audio, YouTube,
+  ingestione.py     MODULO 1 - MusicXML/MXL, MIDI, audio singolo, YouTube,
                     quantizzazione, riduzione pianistica
+  audio_multitraccia.py  MODULO 1c - separazione voce/basso/batteria/resto,
+                    trascrizione per traccia, armonia da basso+resto
   analizzatore.py   MODULO 3.1 - melodia, armonia, basso, groove, frasi
   orchestratore.py  MODULO 3.2 - template di stile, staffetta, voicing
   vincoli.py        MODULO 3.3 - filtri di validazione didattica
@@ -62,6 +106,7 @@ arranger/
   distribuzione.py  casting: chi fa melodia, basso, seconde voci, armonia
   strumenti.py      registro strumenti + regole per livello
   lilypond.py       MODULO 4b - sorgente .ly + incisione PDF
+  frasi_music21.py  rilevatore di frasi avanzato (music21, opzionale)
   ia.py             strato IA opzionale (API Anthropic)
   pipeline.py       orchestrazione end-to-end
 app.py              interfaccia Streamlit (Modulo 2)
@@ -81,7 +126,15 @@ cli.py              interfaccia a riga di comando
 > meno affidabile della catena e produrrebbe segnalazioni fuorviatnti. Richiede
 > `yt-dlp`, `ffmpeg` e `basic-pitch` installati a parte.
 
-**L'ingresso atteso e' una riduzione PIANISTICA** su due righi (chiave di
+**Due forme riconosciute automaticamente.** Oltre alla riduzione pianistica su
+due righi, il software riconosce lo spartito con **parte solista piu'
+pianoforte** (voce, flauto, violino... con l'accompagnamento sotto). In quel
+caso la melodia non viene cercata: e' quella scritta per il solista, per
+intero, e tutto il resto e' accompagnamento. Il riconoscimento e' strutturale e
+non si fida dei nomi: una parte solista ha un rigo solo e suona quasi sempre
+una nota per volta, il pianoforte ha due righi o una scrittura densa.
+
+**Negli altri casi l'ingresso atteso e' una riduzione PIANISTICA** su due righi (chiave di
 violino e di basso) con melodia, armonia e basso gia' scritti. Partiture gia'
 orchestrate, parti staccate o file su un rigo solo danno risultati scadenti:
 il Modulo 3 assume di poter distinguere melodia, armonia e basso dentro una
@@ -291,7 +344,15 @@ L'ordine di assegnazione e' melodia, basso, seconde voci, armonia — e a ogni
 passo si tiene da parte chi servira' dopo: pianoforte e chitarra non vengono
 sottratti all'accompagnamento per fargli fare un controcanto.
 
-**Un solista non accompagna.** Quando la melodia tace, tace anche lui: prima
+**Nessuno resta fermo a lungo.** Un ragazzo che conta ottanta battute di pausa
+si distrae, e in un arrangiamento scolastico una parte silenziosa e' una parte
+sprecata. Chi in un tratto non ha la melodia riceve un accompagnamento adatto
+allo strumento: una nota tenuta dell'armonia per i monodici, un arpeggio per la
+chitarra, gli accordi per i polifonici. La soglia
+(`Configurazione.silenzio_massimo_misure`, 2 misure di default) lascia passare i
+silenzi brevi, che sono respiro e servono.
+
+**Un solista non accompagna mentre canta un altro solista.** Quando la melodia tace, tace anche lui: prima
 riempiva i vuoti con l'armonia, e il risultato era che gli strumenti cantavano
 e accompagnavano a turno senza una logica. Solo se la staffetta e' attiva, nelle
 frasi cantate da altri, passa a seconda voce o accompagnamento.
@@ -314,6 +375,31 @@ contendersi due parti.
 L'accompagnamento a note ripetute viene **diradato**: al massimo un attacco per
 movimento sulla chitarra, due al pianoforte. Ribattere l'accordo su ogni croma
 della figurazione non e' accompagnare.
+
+### Rilevatore di frasi avanzato (music21, facoltativo)
+
+`arranger/frasi_music21.py` usa music21 per leggere quello che il parser
+interno non estrae — legature di portamento, corone, segni di respiro,
+articolazioni, dinamiche — e assegna a ogni stanghetta un punteggio combinando
+otto euristiche: respiro, allungamento della nota finale, cadenza (V-I e
+semicadenza, ricavate da `chordify` piu' l'analisi di tonalita'), salto ampio
+con cambio di direzione, articolazioni, cambio di dinamica, regolarita' metrica
+e **ripetizione motivica** (una progressione riconosciuta sugli intervalli fa
+tagliare all'inizio della ripresa, per l'effetto domanda-risposta).
+
+Due divieti sono assoluti e prevalgono su qualunque punteggio: **mai dentro una
+legatura di portamento**, **mai attraverso una legatura di valore** — li' la
+nota fisicamente continua, e cambiare strumento produrrebbe un attacco che
+nello spartito non c'e'.
+
+Il modulo e' diviso in due, e la divisione non e' cosmetica: `estrai_contesto`
+richiede music21 e traduce lo `Stream` in una struttura neutra, mentre
+`valuta_confini` e `scegli_tagli` sono Python puro. La logica - la parte in cui
+si sbaglia - resta cosi' testabile senza installare nulla, e infatti la suite
+la prova senza music21 costruendo il contesto a mano.
+
+`relazione()` stampa candidato per candidato il punteggio e i motivi: serve a
+tarare i pesi su un repertorio invece di procedere alla cieca.
 
 **Dove si cambia solista.** Mai a caso: lo scambio avviene sui confini
 dell'unita' scelta — a fine **periodo** nei brani classici, fra una **sezione**
@@ -359,10 +445,16 @@ di misura:
 > salti, alterazioni, incroci e levigatura delle ottave. Quei filtri servono a
 > rendere suonabile cio' che il motore inventa, non a riscrivere il testo.
 
-6. **Incroci** — sugli strumenti a due righi la mano destra non scende mai
+6. **Divisi** — i leggii successivi al primo non suonano mai sopra il primo
+   (le note che lo superano scendono d'ottava, o al limite si fermano alla sua
+   altezza) e ricevono valori ritmici piu' larghi. In una sezione scolastica il
+   secondo e il terzo leggio sono quasi sempre gli allievi meno avanti: una
+   parte piu' acuta e piu' mossa della prima, in prova, non regge. Fa
+   eccezione il materiale copiato dall'originale, che non si altera.
+7. **Incroci** — sugli strumenti a due righi la mano destra non scende mai
    sotto la sinistra e non ne raddoppia le note: si alza la destra, o si
    abbassa la sinistra quando e' la destra a portare una melodia grave.
-7. **Ritmico** — valori inferiori al minimo del livello vengono fusi
+8. **Ritmico** — valori inferiori al minimo del livello vengono fusi
    (niente crome in 1ª media, niente semicrome fino alla 3ª), **mai oltre la
    stanghetta**.
 
@@ -454,6 +546,170 @@ Audiveris, PlayScore, Soundslice).
 > Il riconoscimento ottico sbaglia spesso alterazioni, voci e legature, e gli
 > errori si propagano all'intero arrangiamento: il MusicXML prodotto va sempre
 > riletto prima di arrangiarlo.
+
+### Ingresso da audio multitraccia (facoltativo)
+
+`arranger/audio_multitraccia.py` copre il caso in cui non si parte da uno
+spartito ma da una registrazione vera. La pipeline:
+
+1. **Separazione delle fonti** (Demucs, modello `htdemucs`): il file audio
+   viene diviso in quattro tracce — voce, basso, batteria, resto — lanciando
+   Demucs da riga di comando (l'API cambia forma fra le versioni, la riga di
+   comando e' quella stabile).
+2. **Tempo, battere iniziale ed eventuale anacrusi** (`analizza_ritmo`): una
+   sola analisi del **mix intero** — un solo caricamento del file — che
+   restituisce insieme il tempo (`beat_track`), la griglia dei battiti e il
+   primo **attacco** reale (`onset_detect`, silenzio escluso).
+
+   Un file audio comincia quasi sempre con qualche istante di silenzio prima
+   del primo suono, e ancorare la griglia a t=0 del file sposta tutto quanto
+   di quel tanto. Se il primo attacco coincide gia' con un battito (a meno di
+   una tolleranza di ~150 ms, che assorbe l'incertezza tipica della
+   rilevazione) il brano comincia in battere e basta saltare il silenzio; se
+   il primo attacco precede il battito individuato — e la distanza e'
+   inferiore a una misura intera, altrimenti la griglia e' probabilmente
+   sfasata e non si inventa nulla — quella distanza diventa un'**anacrusi**,
+   con la stessa logica, in secondi invece che in quarti, con cui il parser
+   dei file simbolici riconosce l'anacrusi scritta in un MusicXML
+   (`Misura(numero=0, anacrusi=True)`). Tutte le tracce vengono poi ancorate
+   a questo istante, non all'inizio grezzo del file.
+
+   **Perche' il mix intero e non la batteria isolata.** Prima il tempo veniva
+   stimato dalla sola traccia di batteria separata da Demucs, e la griglia
+   dei battiti veniva ricalcolata a parte sul mix intero: due segnali
+   diversi, con la possibilita' concreta di disaccordare. Su registrazioni
+   datate o dal mix scarno — un'incisione dei primi anni '60, per dire — la
+   batteria isolata puo' uscire debole o incompleta, e la stima del tempo ne
+   risente parecchio. Il mix intero ha sempre il ritmo portato anche da
+   basso, chitarre e voce.
+
+   > **Niente fallimenti silenziosi.** Se l'analisi del ritmo falliva, il
+   > codice ripiegava su 100 bpm **senza dirlo a nessuno**: un numero
+   > plausibile ma falso, che mandava fuori squadra tutto il resto (griglia,
+   > misure, posizione del battere) senza lasciare traccia del perche'. Ogni
+   > fallimento produce ora un avviso esplicito nel report, e il tempo
+   > effettivamente usato viene sempre dichiarato.
+
+   > **Correzione manuale del tempo.** Nessun rilevatore automatico e'
+   > infallibile: l'errore piu' comune e' sbagliare "ottava", cioe' rilevare
+   > meta' o il doppio del tempo vero, ed e' difficile escluderlo in
+   > automatico con certezza. Il tempo si puo' quindi imporre a mano —
+   > casella dedicata nell'interfaccia, `--bpm` da riga di comando,
+   > `bpm_manuale=` nell'API — e in quel caso la ricerca del battere e
+   > dell'anacrusi continua a girare usando quel valore come riferimento.
+   > Se il battere non torna, questa e' la prima cosa da provare.
+
+   > **Un bug piu' profondo, scoperto risolvendo questo.** Voce, basso e
+   > resto viaggiavano su un orologio diverso da quello della batteria: il
+   > MIDI intermedio che Basic Pitch scrive per la trascrizione usa un tempo
+   > interno arbitrario (di norma 120 bpm) che non ha alcun rapporto con il
+   > tempo reale del brano, mentre la batteria veniva gia' misurata in
+   > secondi reali. Ora quel MIDI intermedio viene scritto a un tempo neutro
+   > noto (`midi_tempo=60.0`: un quarto = un secondo esatto), e tutte e
+   > quattro le tracce vengono riportate sulla stessa linea del tempo — e
+   > ancorate all'istante trovato sopra — prima di essere quantizzate.
+3. **Trascrizione per traccia**: Basic Pitch legge voce, basso e resto;
+   voce e basso vengono ridotte a una linea sola (si tiene, a ogni attacco,
+   la nota piu' acuta per la voce, la piu' grave per il basso — i doppi
+   residui sono quasi sempre armonici presi per note vere). La batteria non
+   ha un'altezza da trascrivere: si usano gli **onset** di `librosa` e, per
+   ognuno, l'energia in tre bande spettrali (sotto 150 Hz quasi sempre cassa,
+   150–800 Hz rullante, sopra 5 kHz charleston/piatti) per classificarlo. E'
+   un'euristica di ritmo, non un riconoscitore di timbro.
+4. **Quantizzazione e pulizia**: si riusa `ingestione.quantizza` — costruire
+   uno `Spartito` usa e getta evita di duplicare la logica di pulizia gia'
+   scritta per l'ingresso simbolico.
+5. **Assemblaggio diretto**, senza passare dal rilevatore di melodia: la voce
+   **e'** la melodia, non va indovinata; il basso da' il movimento per gli
+   strumenti gravi ed e', insieme al resto, la base per dedurre la griglia
+   armonica (si riusano le stesse funzioni di punteggio del riconoscimento
+   armonico principale, `_pesi_classi` e `_punteggio_accordo`); il resto
+   diventa `Analisi.figurazione`, cioe' il materiale di riempimento per
+   l'accompagnamento, esattamente come la mano sinistra di un pianoforte nel
+   percorso simbolico. La batteria, se trascritta, sostituisce il pattern di
+   percussioni generico del motore (`pattern_da_batteria_reale`): e' il punto
+   in cui l'importazione da audio da' qualcosa che partendo da un pianoforte
+   non si potrebbe mai avere.
+
+Se la traccia voce risulta vuota (brano strumentale, voce non isolabile) il
+brano viene segnalato come privo di un tema affidabile invece di inventarne
+uno: lo stesso principio della modalita' **Orchestra i registri**.
+
+**Debug: le tracce separate, scaricabili — quantizzate E non.**
+`esporta_tracce_musicxml(risultato, percorso, quantizzate=...)` scrive un
+MusicXML a parte con voce, basso, batteria e resto, quattro righi indipendenti
+con un evento per attacco, prima che l'arrangiatore le tocchi. Esistono **due
+versioni**, generate entrambe di default da `esegui_da_audio_multitraccia`
+(disattivabile con `esporta_tracce_debug=False`, o `--no-tracce-debug` da riga
+di comando) e scaricabili separatamente dall'interfaccia nella scheda
+Download:
+
+- **quantizzata** (`quantizzate=True`) — gli attacchi agganciati alla griglia,
+  esattamente cio' che l'arrangiatore usa come materiale di partenza;
+- **non quantizzata** (`quantizzate=False`) — gli attacchi esattamente dove
+  li ha sentiti la trascrizione, senza alcun aggancio al tempo.
+
+Confrontarle e' il modo piu' diretto per capire da dove viene un errore: se
+una nota e' gia' sbagliata nella versione non quantizzata, il problema e'
+nella separazione o nella trascrizione, a monte di qualunque euristica del
+motore; se compare solo in quella quantizzata, e' l'aggancio alla griglia ad
+aver spostato o fuso qualcosa che andava lasciato com'era. Prima di questa
+distinzione la sola domanda "la separazione ha prodotto materiale utile?"
+restava confusa con "la quantizzazione ha fatto un buon lavoro?" — due
+domande diverse che ora hanno due file diversi.
+
+> **Nota tecnica.** Gli attacchi di una trascrizione vera non cadono su
+> nessuna griglia regolare (millisecondi arbitrari), e l'esportatore
+> MusicXML condiviso scompone le durate in un catalogo chiuso di figure
+> ritmiche (intero, meta', quarto... fino al trentaduesimo e alle terzine):
+> un resto che non e' combinazione di quei valori veniva scartato in
+> silenzio, con il rischio che la somma di una misura non tornasse piu'
+> esatta. La versione non quantizzata aggancia percio' gli attacchi al valore
+> piu' piccolo che la notazione sa scrivere (un trentaduesimo, circa 60 ms a
+> 120 bpm) prima di costruire gli eventi — un'approssimazione tecnica
+> necessaria, non la quantizzazione musicale a griglia (0,25 di quarto di
+> default) che questa vista serve a bypassare: la differenza fra le due resta
+> ben visibile.
+
+Dipendenze, tutte facoltative — senza, l'ingresso resta limitato agli
+spartiti simbolici:
+
+Per misurare quanto una trascrizione si avvicina a una partitura vera:
+
+```bash
+python strumenti_confronto.py nostro.musicxml partitura.musicxml \
+    --nostra Voce --loro Voice
+```
+
+Confronta NOTA PER NOTA e riporta precisione (quante delle nostre note
+trovano riscontro) e richiamo (quante note del riferimento abbiamo trovato).
+Serve a non tarare a occhio: una regola che alza l'una abbassando l'altra
+non sta migliorando niente.
+
+Per iterare sulla sola estrazione del basso senza rigenerare tutto:
+
+```bash
+python strumenti_basso.py brano.mp3 --tonica Do#
+python strumenti_basso.py brano.mp3 --collassa --fmin 41 --fmax 200
+```
+
+La separazione viene fatta una volta e riusata; ogni prova successiva
+richiede secondi invece di minuti.
+
+```bash
+pip install demucs basic-pitch librosa
+# facoltativo, per un rilevamento del tempo piu' preciso:
+pip install tqdm einops soxr rotary-embedding-torch
+pip install https://github.com/CPJKU/beat_this/archive/main.zip
+```
+
+Demucs installa anche PyTorch (alcune centinaia di MB, qualche minuto).
+Sull'istanza pubblica queste dipendenze non sono installate e la sezione
+"Importa da una registrazione audio" resta nascosta nell'interfaccia — stessa
+scelta gia' fatta per il riconoscimento ottico dei PDF, per lo stesso motivo:
+sono pesanti per un servizio cloud gratuito e la trascrizione resta la parte
+meno affidabile della catena. Da riga di comando: `python cli.py brano.mp3
+--audio --organico ...`.
 
 ### Modulo 4b — Export LilyPond
 

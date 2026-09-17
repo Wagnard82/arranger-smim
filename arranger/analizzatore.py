@@ -1267,6 +1267,9 @@ def rileva_figurazione(sp: Spartito, melodia: List[Nota]) -> List[Nota]:
     riconosciuta la melodia, il resto e' accompagnamento e va sfruttato, non
     ridotto a una griglia di accordi.
     """
+    if sp.tipo == "solista_e_piano" and sp.parte_solista is not None:
+        # tutto quello che non canta il solista e' accompagnamento, punto
+        return [n for n in sp.note if n.origine != sp.parte_solista]
     chiavi_melodia = {(round(n.inizio, 6), n.midi) for n in melodia}
     return [n for n in sp.note if (round(n.inizio, 6), n.midi) not in chiavi_melodia]
 
@@ -1446,14 +1449,45 @@ def _melodia_affidabile(sp: Spartito, melodia: List[Nota],
 
 
 def analizza(sp: Spartito) -> Analisi:
-    return analizza_con_melodia(sp, rileva_melodia(sp))
+    return analizza_con_melodia(sp, melodia_dello_spartito(sp))
+
+
+def melodia_dello_spartito(sp: Spartito) -> List[Nota]:
+    """
+    La melodia: scritta, se lo spartito ha una parte solista; dedotta
+    altrimenti.
+
+    Quando il file contiene una parte per voce (o strumento singolo) piu' il
+    pianoforte, cercare la melodia e' non solo inutile ma dannoso: la melodia
+    e' quella parte, per intero, e ogni euristica non puo' che peggiorarla.
+    """
+    if sp.tipo == "solista_e_piano" and sp.parte_solista is not None:
+        return linea_del_solista(sp)
+    return rileva_melodia(sp)
+
+
+def linea_del_solista(sp: Spartito) -> List[Nota]:
+    """Riduce a una linea la parte del solista (una nota per attacco)."""
+    note = [n for n in sp.note if n.origine == sp.parte_solista]
+    attacchi = sorted({round(n.inizio, 6) for n in note})
+    linea: List[Nota] = []
+    for t in attacchi:
+        gruppo = [n for n in note if abs(n.inizio - t) < 1e-6]
+        scelta = max(gruppo, key=lambda n: n.midi)
+        if linea and linea[-1].fine > t + 1e-6:
+            linea[-1].durata = max(0.125, t - linea[-1].inizio)
+        linea.append(Nota(midi=scelta.midi, inizio=scelta.inizio,
+                          durata=scelta.durata, rigo=1, voce=1,
+                          origine=scelta.origine))
+    return linea
 
 
 def analizza_con_melodia(sp: Spartito, melodia: List[Nota]) -> Analisi:
     """Come `analizza`, ma con una melodia gia' decisa (per esempio dall'IA)."""
     # se lo spartito porta gia' le sigle, quelle comandano
     armonia = armonia_dalle_sigle(sp) or rileva_armonia(sp)
-    melodia = completa_mano(sp, scarta_figurazione(sp, melodia, armonia))
+    if sp.tipo != "solista_e_piano":
+        melodia = completa_mano(sp, scarta_figurazione(sp, melodia, armonia))
     basso = rileva_basso(sp, armonia)
     figurazione = rileva_figurazione(sp, melodia)
     voci = rileva_voci_interne(sp, melodia + basso)

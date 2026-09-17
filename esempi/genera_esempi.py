@@ -585,6 +585,65 @@ def con_sigle_e_sei_ottavi(percorso):
     return percorso
 
 
+def voce_e_pianoforte(percorso):
+    """
+    Spartito con parte solista (voce) piu' accompagnamento di pianoforte: e' la
+    forma in cui circola quasi tutta la musica vocale. Qui la melodia non va
+    cercata, e' scritta.
+    """
+    melodia = [[(72, 1), (74, 1), (76, 2)], [(74, 1), (72, 1), (71, 2)],
+               [(69, 1), (71, 1), (72, 2)], [(72, 4)]]
+    bassi = [48, 43, 41, 48]
+    accordi = [[60, 64, 67], [59, 62, 67], [57, 60, 65], [60, 64, 67]]
+    righe = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<!DOCTYPE score-partwise PUBLIC '
+             '"-//Recordare//DTD MusicXML 4.0 Partwise//EN" '
+             '"http://www.musicxml.org/dtds/partwise.dtd">',
+             '<score-partwise version="4.0">',
+             "  <work><work-title>Voce e pianoforte</work-title></work>",
+             "  <part-list>",
+             '    <score-part id="P1"><part-name>Voce</part-name></score-part>',
+             '    <score-part id="P2"><part-name>Pianoforte</part-name>'
+             "</score-part>",
+             "  </part-list>", '  <part id="P1">']
+    for i, battuta in enumerate(melodia):
+        righe.append(f'    <measure number="{i + 1}">')
+        if i == 0:
+            righe += ["      <attributes>",
+                      f"        <divisions>{DIV}</divisions>",
+                      "        <key><fifths>0</fifths></key>",
+                      "        <time><beats>4</beats><beat-type>4</beat-type>"
+                      "</time>",
+                      "        <clef><sign>G</sign><line>2</line></clef>",
+                      "      </attributes>"]
+        for midi, q in battuta:
+            righe += _nota(midi, q, 1, 1)
+        righe.append("    </measure>")
+    righe += ["  </part>", '  <part id="P2">']
+    for i in range(4):
+        righe.append(f'    <measure number="{i + 1}">')
+        if i == 0:
+            righe += ["      <attributes>",
+                      f"        <divisions>{DIV}</divisions>",
+                      "        <key><fifths>0</fifths></key>",
+                      "        <time><beats>4</beats><beat-type>4</beat-type>"
+                      "</time>",
+                      "        <staves>2</staves>",
+                      '        <clef number="1"><sign>G</sign><line>2</line>'
+                      "</clef>",
+                      '        <clef number="2"><sign>F</sign><line>4</line>'
+                      "</clef>",
+                      "      </attributes>"]
+        for k, midi in enumerate(accordi[i]):
+            righe += _nota(midi, 4, 1, 1, accordo=(k > 0))
+        righe.append(f"      <backup><duration>{int(4 * DIV)}</duration></backup>")
+        righe += _nota(bassi[i], 4, 2, 2)
+        righe.append("    </measure>")
+    righe += ["  </part>", "</score-partwise>"]
+    _scrivi(percorso, righe)
+    return percorso
+
+
 def basso_ritmico(percorso):
     """
     Mano sinistra con una figurazione ritmica precisa (basso puntato + croma),
@@ -634,3 +693,4 @@ if __name__ == "__main__":
     print(melodia_arpeggiata(os.path.join(qui, "melodia_arpeggiata.xml")))
     print(sinistra_sotto_accordi(os.path.join(qui, "sinistra_sotto_accordi.xml")))
     print(con_sigle_e_sei_ottavi(os.path.join(qui, "sigle_sei_ottavi.xml")))
+    print(voce_e_pianoforte(os.path.join(qui, "voce_e_piano.xml")))

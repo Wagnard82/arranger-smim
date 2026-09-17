@@ -118,109 +118,145 @@ with st.sidebar:
     liv = st.radio("Classe", list(LIVELLI.keys()), index=0, label_visibility="collapsed")
     st.info(livello(liv).note)
 
-    st.header("3 · Impostazione")
-    modo = st.radio(
-        "Come trattare il brano",
-        ["auto", "melodico", "tessitura"], horizontal=True,
-        format_func=lambda x: {"auto": "Automatico",
-                               "melodico": "Melodia + accompagnamento",
-                               "tessitura": "Orchestra i registri"}[x],
-        help=("'Melodia + accompagnamento' cerca il tema e lo affida a un "
-              "solista. 'Orchestra i registri' non cerca nessuna melodia e "
-              "divide il tessuto dell'originale fra gli strumenti per fasce "
-              "di altezza: e' la scelta giusta per i brani puramente "
-              "pianistici, dove un tema da cantare non c'e'."))
-
-    st.header("3b · Stile")
-    stili = ["Normale", "Cinematico", "Jazz", "Automatico"]
+    st.header("3 · Stile")
     stile = st.selectbox(
-        "Stile di arrangiamento", stili,
-        help=("'Automatico' fa scegliere stile e tipo di accompagnamento "
-              "al modello, che tiene conto anche di cio' che si sa del brano "
-              "originale. Richiede l'IA attiva."))
+        "Stile di arrangiamento", ["Normale", "Cinematico", "Jazz"])
 
-    st.header("4 · Chi porta la melodia")
-    attive = {k: v for k, v in formazione.items() if v > 0}
-    parti_possibili = [p for p in costruisci_parti(Configurazione(formazione=attive))
-                       if not strumento(p.strumento).percussione]
-    etichette = {p.id: p.nome for p in parti_possibili}
-    scelte_melodia = st.multiselect(
-        "Strumenti solisti", options=list(etichette.keys()),
-        format_func=lambda i: etichette.get(i, i),
-        help=("Se non selezioni nulla decide il motore. Selezionando piu' "
-              "strumenti la melodia passa dall'uno all'altro, frase per frase."))
-    staffetta = st.checkbox("Fai passare la melodia fra i solisti", value=True)
-    cambio = st.selectbox(
-        "Quando cambiare solista",
-        ["auto", "periodo", "sezione", "frase"], disabled=not staffetta,
-        help=("Lo scambio avviene sempre a fine frase. 'periodo' aspetta la "
-              "chiusura del periodo (antecedente + conseguente), 'sezione' "
-              "cambia fra strofa e ritornello. Con 'auto' decide il software "
-              "in base alla forma del brano, e nei ritornelli manda i solisti "
-              "all'unisono."))
-    minimo_solista = st.slider(
-        "Misure minime prima di passare la melodia", 2, 24, 8,
-        disabled=not staffetta,
-        help=("Anche se una frase finisce, il solista non cambia prima di "
-              "tante misure: scambi troppo ravvicinati confondono e non danno "
-              "il tempo di riconoscere il timbro."))
-    raddoppi = st.checkbox("Consenti raddoppi della melodia", value=True)
+    # ----------------------------------------------------------------
+    # Impostazioni avanzate: tutto cio' che non serve al primo utilizzo
+    # resta chiuso qui dentro, con valori predefiniti sensati.
+    # ----------------------------------------------------------------
+    with st.expander("⚙️ Impostazioni avanzate"):
+        st.markdown("**Come trattare il brano**")
+        modo = st.radio(
+            "Come trattare il brano", ["auto", "melodico", "tessitura"],
+            horizontal=True, label_visibility="collapsed",
+            format_func=lambda x: {"auto": "Automatico",
+                                   "melodico": "Melodia + accompagnamento",
+                                   "tessitura": "Orchestra i registri"}[x],
+            help=("'Melodia + accompagnamento' cerca il tema e lo affida a "
+                  "un solista. 'Orchestra i registri' non cerca nessuna "
+                  "melodia e divide il tessuto dell'originale fra gli "
+                  "strumenti per fasce di altezza: e' la scelta giusta per "
+                  "i brani puramente pianistici, dove un tema da cantare "
+                  "non c'e'."))
+        stile_automatico = st.checkbox(
+            "Lascia scegliere lo stile all'IA ('Automatico')", value=False,
+            help=("Sovrascrive lo stile scelto sopra: il modello propone "
+                  "stile e tipo di accompagnamento tenendo conto anche di "
+                  "cio' che si sa del brano originale. Richiede l'IA "
+                  "attiva piu' sotto."))
+        if stile_automatico:
+            stile = "Automatico"
 
-    st.header("5 · Opzioni")
-    trasporto = st.slider("Trasporto (semitoni)", -12, 12, 0)
-    genera_ly = st.checkbox("Genera anche il sorgente LilyPond (.ly)", value=False)
-    debug = st.checkbox(
-        "Modalita' confronto", value=False,
-        help=("Accoda in fondo alla partitura lo spartito originale, "
-              "non modificato: aprendo il file si legge l'arrangiamento "
-              "sopra e l'originale sotto, battuta per battuta."))
-    st.header("6 · Intelligenza artificiale")
-    # la chiave puo' arrivare dai segreti dell'istanza o essere incollata qui
-    try:
-        ia.configura_chiave(st.secrets["anthropic"]["api_key"])
-        chiave_da_segreti = True
-    except Exception:
-        chiave_da_segreti = False
+        st.markdown("**Chi porta la melodia**")
+        attive = {k: v for k, v in formazione.items() if v > 0}
+        parti_possibili = [
+            p for p in costruisci_parti(Configurazione(formazione=attive))
+            if not strumento(p.strumento).percussione]
+        etichette = {p.id: p.nome for p in parti_possibili}
+        scelte_melodia = st.multiselect(
+            "Strumenti solisti", options=list(etichette.keys()),
+            format_func=lambda i: etichette.get(i, i),
+            help=("Se non selezioni nulla decide il motore. Selezionando "
+                  "piu' strumenti la melodia passa dall'uno all'altro, "
+                  "frase per frase."))
+        staffetta = st.checkbox("Fai passare la melodia fra i solisti",
+                                value=True)
+        cambio = st.selectbox(
+            "Quando cambiare solista",
+            ["auto", "periodo", "sezione", "frase"], disabled=not staffetta,
+            help=("Lo scambio avviene sempre a fine frase. 'periodo' "
+                  "aspetta la chiusura del periodo (antecedente + "
+                  "conseguente), 'sezione' cambia fra strofa e ritornello. "
+                  "Con 'auto' decide il software in base alla forma del "
+                  "brano, e nei ritornelli manda i solisti all'unisono."))
+        from arranger import frasi_music21 as _fm21
+        frasi_avanzate = st.checkbox(
+            "Rilevatore di frasi avanzato (music21)", value=False,
+            disabled=not _fm21.disponibile(),
+            help=("Usa music21 per leggere legature di portamento, corone, "
+                  "segni di respiro e articolazioni: i cambi di solista "
+                  "cadono dove la musica respira davvero, e mai dentro una "
+                  "legatura."))
+        if not _fm21.disponibile():
+            st.caption("Per attivarlo: pip install music21.")
+        minimo_solista = st.slider(
+            "Misure minime prima di passare la melodia", 2, 24, 8,
+            disabled=not staffetta,
+            help=("Anche se una frase finisce, il solista non cambia prima "
+                  "di tante misure: scambi troppo ravvicinati confondono e "
+                  "non danno il tempo di riconoscere il timbro."))
+        raddoppi = st.checkbox("Consenti raddoppi della melodia", value=True)
 
-    stato_ia = ia.stato()
-    if not stato_ia["libreria"]:
-        st.caption("Per usare l'IA serve il pacchetto `anthropic` "
-                   "(`pip install anthropic`). Senza, il motore lavora "
-                   "comunque con le sue regole.")
-        usa_ia = False
-        funzioni_ia = set()
-        modello_ia = ia.MODELLO_DEFAULT
-    else:
-        if not chiave_da_segreti:
-            chiave = st.text_input("Chiave API Anthropic", type="password",
-                                   help="Resta solo in questa sessione.")
-            if chiave:
-                ia.configura_chiave(chiave)
-            stato_ia = ia.stato()
+        st.markdown("**Altre opzioni**")
+        trasporto = st.slider("Trasporto (semitoni)", -12, 12, 0)
+        riempi = st.checkbox(
+            "Nessuno strumento resta fermo a lungo", value=True,
+            help=("Chi in un tratto non ha la melodia accompagna: una nota "
+                  "tenuta, un arpeggio, gli accordi. Restano i silenzi "
+                  "brevi, che sono respiro."))
+        silenzio_max = st.slider("Pausa massima tollerata (misure)", 1, 8, 2,
+                                 disabled=not riempi)
+        genera_ly = st.checkbox("Genera anche il sorgente LilyPond (.ly)",
+                                value=False)
+        debug = st.checkbox(
+            "Modalita' confronto", value=False,
+            help=("Accoda in fondo alla partitura lo spartito originale, "
+                  "non modificato: aprendo il file si legge l'arrangiamento "
+                  "sopra e l'originale sotto, battuta per battuta."))
 
-        usa_ia = st.checkbox("Attiva l'IA", value=False,
-                             disabled=not stato_ia["chiave"])
-        if not stato_ia["chiave"]:
-            st.caption("Incolla una chiave API per attivarla.")
+        st.markdown("**Intelligenza artificiale**")
+        # la chiave puo' arrivare dai segreti dell'istanza o essere
+        # incollata qui
+        try:
+            ia.configura_chiave(st.secrets["anthropic"]["api_key"])
+            chiave_da_segreti = True
+        except Exception:
+            chiave_da_segreti = False
 
-        modello_etichetta = st.selectbox("Modello", list(ia.MODELLI),
-                                         disabled=not usa_ia)
-        modello_ia = ia.MODELLI[modello_etichetta]
+        stato_ia = ia.stato()
+        if not stato_ia["libreria"]:
+            st.caption("Per usare l'IA serve il pacchetto `anthropic` "
+                       "(`pip install anthropic`). Senza, il motore lavora "
+                       "comunque con le sue regole.")
+            usa_ia = False
+            funzioni_ia = set()
+            modello_ia = ia.MODELLO_DEFAULT
+        else:
+            if not chiave_da_segreti:
+                chiave = st.text_input("Chiave API Anthropic",
+                                       type="password",
+                                       help="Resta solo in questa sessione.")
+                if chiave:
+                    ia.configura_chiave(chiave)
+                stato_ia = ia.stato()
 
-        predefinite = {"melodia", "stile"}
-        funzioni_ia = set()
-        for chiave_f, (titolo_f, spiega) in ia.FUNZIONI.items():
-            if st.checkbox(titolo_f, value=(chiave_f in predefinite),
-                           key=f"ia_{chiave_f}", disabled=not usa_ia,
-                           help=spiega):
-                funzioni_ia.add(chiave_f)
-        if usa_ia:
-            st.caption(f"{len(funzioni_ia)} chiamate al modello per "
-                       "arrangiamento (la ricerca sul brano ne aggiunge "
-                       "qualcuna in piu').")
-            if st.button("Prova la connessione"):
-                ok, messaggio = ia.prova_connessione(modello_ia)
-                (st.success if ok else st.error)(messaggio)
+            usa_ia = st.checkbox("Attiva l'IA", value=False,
+                                 disabled=not stato_ia["chiave"])
+            if not stato_ia["chiave"]:
+                st.caption("Incolla una chiave API per attivarla.")
+
+            modello_etichetta = st.selectbox("Modello", list(ia.MODELLI),
+                                             disabled=not usa_ia)
+            modello_ia = ia.MODELLI[modello_etichetta]
+
+            predefinite = {"melodia", "stile"}
+            funzioni_ia = set()
+            for chiave_f, (titolo_f, spiega) in ia.FUNZIONI.items():
+                if st.checkbox(titolo_f, value=(chiave_f in predefinite),
+                               key=f"ia_{chiave_f}", disabled=not usa_ia,
+                               help=spiega):
+                    funzioni_ia.add(chiave_f)
+            if usa_ia:
+                st.caption(f"{len(funzioni_ia)} chiamate al modello per "
+                           "arrangiamento (la ricerca sul brano ne "
+                           "aggiunge qualcuna in piu').")
+                if st.button("Prova la connessione"):
+                    ok, messaggio = ia.prova_connessione(modello_ia)
+                    (st.success if ok else st.error)(messaggio)
+
+
 
 # ==========================================================================
 # MODULO 1 - Ingestione (solo spartiti pianistici)
@@ -262,6 +298,59 @@ with PRINCIPALE:
         demo = st.checkbox("Prova con il brano dimostrativo",
                            help="Inno alla Gioia, con anacrusi")
 
+    # ---------------------------------------------------------- audio multitraccia
+    # Visibile solo se le dipendenze pesanti (demucs, basic-pitch) sono
+    # installate: sull'istanza pubblica restano assenti e questa sezione non
+    # compare, coerentemente con la scelta di non esporre l'ingresso audio
+    # li' (la trascrizione resta la parte meno affidabile della catena).
+    from arranger import audio_multitraccia as am
+    _stato_audio = am.stato_dipendenze()
+    caricato_audio = None
+    usa_audio = False
+    bpm_manuale = None
+    if _stato_audio["demucs"] and _stato_audio["basic_pitch"]:
+        with st.expander("🎤 Oppure importa da una registrazione audio"):
+            st.caption(
+                "Separa voce, basso, batteria e resto (Demucs), trascrive "
+                "ogni traccia e usa la voce come melodia, il basso come "
+                "sostegno grave e base per l'armonia, la batteria come "
+                "pattern ritmico reale. Ci vogliono alcuni minuti su CPU.")
+            caricato_audio = st.file_uploader(
+                "Registrazione audio (mp3, wav, m4a...)",
+                type=["mp3", "wav", "m4a", "flac", "ogg"])
+            usa_audio = caricato_audio is not None
+            if not _stato_audio["librosa"]:
+                st.caption("`librosa` non installato: la batteria non verra' "
+                           "trascritta, le percussioni useranno comunque un "
+                           "pattern automatico. Anche il tempo del brano "
+                           "non potra' essere rilevato: indicalo qui sotto.")
+            if _stato_audio["librosa"] and not _stato_audio.get("beat_this"):
+                st.caption(
+                    "Il tempo verra' stimato con `librosa`. Installando "
+                    "`beat_this` la stima diventa piu' affidabile sui brani "
+                    "dal ritmo sincopato, dove librosa tende ad agganciarsi "
+                    "a una suddivisione sbagliata — e un tempo sbagliato "
+                    "sposta tutta la quantizzazione. Si appoggia a PyTorch, "
+                    "che Demucs ha gia' installato.")
+            bpm_auto = st.checkbox(
+                "Rileva il tempo (bpm) automaticamente", value=True,
+                disabled=not _stato_audio["librosa"],
+                help=("Nessun rilevatore automatico e' infallibile. Con "
+                      "`beat_this` installato la stima e' piu' solida; con "
+                      "il solo librosa l'errore piu' comune e' agganciarsi a "
+                      "una suddivisione sbagliata del battito, specie sui "
+                      "ritmi sincopati o sulle registrazioni datate. Se "
+                      "conosci il tempo del brano, disattiva e indicalo: "
+                      "resta sempre la scelta piu' sicura."))
+            bpm_manuale = None
+            if not bpm_auto or not _stato_audio["librosa"]:
+                bpm_manuale = st.number_input(
+                    "Tempo del brano (bpm)", min_value=20.0, max_value=300.0,
+                    value=100.0, step=1.0,
+                    help="Se non lo conosci con precisione, un valore "
+                         "approssimativo va gia' meglio di un rilevamento "
+                         "automatico sbagliato di un'ottava.")
+
     avvia = st.button("🎻 Genera arrangiamento", type="primary", use_container_width=True)
 
     # ==========================================================================
@@ -273,7 +362,11 @@ with PRINCIPALE:
             st.error("Seleziona almeno uno strumento nella formazione.")
             st.stop()
 
-        if demo:
+        if usa_audio:
+            sorgente = os.path.join(CARTELLA, caricato_audio.name)
+            with open(sorgente, "wb") as f:
+                f.write(caricato_audio.getbuffer())
+        elif demo:
             from esempi import genera_esempi
             sorgente = genera_esempi.inno_alla_gioia(
                 os.path.join(CARTELLA, "inno_alla_gioia.xml"))
@@ -290,16 +383,27 @@ with PRINCIPALE:
                              strumenti_melodia=scelte_melodia,
                              staffetta_melodia=staffetta, raddoppi_melodia=raddoppi,
                              modo=modo, cambio_solista=cambio,
+                             frasi_music21=frasi_avanzate,
+                             riempi_silenzi=riempi,
+                             silenzio_massimo_misure=silenzio_max,
                              misure_minime_solista=minimo_solista,
                              debug_originale=debug, usa_ia=usa_ia,
                              modello_ia=modello_ia)
         for funzione in ia.FUNZIONI:
             setattr(cfg, f"ia_{funzione}", funzione in funzioni_ia)
 
-        with st.spinner("Analisi e arrangiamento in corso..."):
+        with st.spinner("Separazione delle tracce e arrangiamento in corso "
+                        "(qualche minuto)..." if usa_audio else
+                        "Analisi e arrangiamento in corso..."):
             try:
-                st.session_state["risultato"] = esegui(
-                    sorgente, cfg, cartella=CARTELLA, esporta_ly=genera_ly)
+                from arranger.pipeline import esegui_da_audio_multitraccia
+                if usa_audio:
+                    st.session_state["risultato"] = esegui_da_audio_multitraccia(
+                        sorgente, cfg, cartella=CARTELLA, esporta_ly=genera_ly,
+                        bpm_manuale=bpm_manuale)
+                else:
+                    st.session_state["risultato"] = esegui(
+                        sorgente, cfg, cartella=CARTELLA, esporta_ly=genera_ly)
             except Exception as e:
                 st.error(f"Non sono riuscito a elaborare il file: {e}")
                 with st.expander("Dettagli tecnici"):
@@ -376,6 +480,40 @@ with PRINCIPALE:
                     st.download_button("Scarica il sorgente LilyPond (.ly)", f.read(),
                                        file_name=os.path.basename(r.percorso_ly),
                                        mime="text/plain", use_container_width=True)
+            if r.percorso_tracce_debug and os.path.exists(r.percorso_tracce_debug):
+                st.divider()
+                st.markdown("**Tracce separate (debug)**")
+                st.caption(
+                    "Voce, basso, batteria e resto separate dall'audio, "
+                    "prima che l'arrangiatore le tocchi: apri questi file "
+                    "per valutare la qualita' della separazione e della "
+                    "trascrizione indipendentemente dall'arrangiamento "
+                    "finale.")
+                c1, c2 = st.columns(2)
+                with open(r.percorso_tracce_debug, "rb") as f:
+                    c1.download_button(
+                        "Quantizzate", f.read(),
+                        file_name=os.path.basename(r.percorso_tracce_debug),
+                        mime="application/vnd.recordare.musicxml+xml",
+                        use_container_width=True,
+                        help="Attacchi agganciati alla griglia: quello che "
+                             "usa l'arrangiatore.")
+                if r.percorso_tracce_grezze and os.path.exists(r.percorso_tracce_grezze):
+                    with open(r.percorso_tracce_grezze, "rb") as f:
+                        c2.download_button(
+                            "Non quantizzate", f.read(),
+                            file_name=os.path.basename(r.percorso_tracce_grezze),
+                            mime="application/vnd.recordare.musicxml+xml",
+                            use_container_width=True,
+                            help="Attacchi esattamente dove li ha sentiti la "
+                                 "trascrizione, senza aggancio alla griglia: "
+                                 "se un errore c'e' gia' qui, non e' colpa "
+                                 "della quantizzazione.")
+                st.caption(
+                    "Confrontale: una nota sbagliata gia' nella versione "
+                    "non quantizzata viene dalla separazione o dalla "
+                    "trascrizione; se compare solo in quella quantizzata, "
+                    "e' l'aggancio alla griglia ad averla spostata o fusa.")
             st.caption("Il MusicXML si apre in MuseScore, Dorico, Sibelius e Finale: "
                        "nomi degli strumenti, graffa del pianoforte, armature "
                        "trasposte, dinamiche e articolazioni sono gia' impostate.")

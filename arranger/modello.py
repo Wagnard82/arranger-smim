@@ -47,6 +47,7 @@ class Nota:
     voce: int = 1
     legata_dopo: bool = False
     legata_prima: bool = False
+    origine: int = 0          # indice della parte del file da cui viene
 
     @property
     def fine(self) -> float:
@@ -102,6 +103,11 @@ class Spartito:
     misure: List[Misura] = field(default_factory=list)
     bpm: float = 90.0
     anacrusi: float = 0.0  # durata in quarti della battuta di levare (0 = nessuna)
+    tipo: str = "pianistico"
+    # "pianistico" | "solista_e_piano" | "audio_multitraccia"
+    parte_solista: Optional[int] = None   # indice della parte che canta
+    colpi_batteria: list = field(default_factory=list)
+    # ColpoBatteria dalla separazione audio, se lo spartito viene da li'
     dinamiche: List[Tuple[float, str]] = field(default_factory=list)
     # [(offset in quarti, "p"/"mf"/"ff"/...)] lette dallo spartito originale
     sigle: List[Tuple[float, int, str, Optional[int]]] = field(default_factory=list)
@@ -300,6 +306,9 @@ class Configurazione:
                                        # per tante misure prima di passarla
     raddoppi_melodia: bool = True
     modo: str = "auto"             # auto | melodico | tessitura
+    frasi_music21: bool = False    # rilevatore di frasi avanzato (richiede music21)
+    riempi_silenzi: bool = True    # nessuno strumento resta fermo a lungo
+    silenzio_massimo_misure: int = 2
     debug_originale: bool = False   # accoda lo spartito originale alla partitura
     usa_ia: bool = False
     modello_ia: str = "claude-sonnet-4-6"

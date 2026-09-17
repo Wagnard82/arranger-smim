@@ -8,3 +8,28 @@ streamlit>=1.32
 # --- Strato IA (facoltativo) -----------------------------------------------
 # Serve solo se vuoi le funzioni IA. Senza, l'app funziona con le sue regole.
 anthropic>=0.40.0
+
+# --- Facoltativo: rilevatore di frasi avanzato -----------------------------
+# Legge legature di portamento, corone, respiri e articolazioni, che il parser
+# interno non estrae. Senza, si usa il rilevatore di base.
+# music21>=9.1
+
+# --- Facoltativo: importazione da audio multitraccia ------------------------
+# Separa voce/basso/batteria/resto (Demucs, che installa anche PyTorch: alcune
+# centinaia di MB) e trascrive ogni traccia (Basic Pitch). Senza, l'ingresso
+# resta limitato a spartiti simbolici (MusicXML, MIDI, PDF con OMR).
+# demucs>=4.0
+# basic-pitch>=0.3.0
+# librosa>=0.10          # facoltativo anche fra i facoltativi: senza, la
+#                        # batteria non viene trascritta ma il resto funziona
+# beat_this             # facoltativo: rilevamento del tempo con rete
+#                        # neurale (ISMIR 2024), nettamente piu' affidabile di
+#                        # librosa sui brani dal ritmo sincopato, dove un tempo
+#                        # sbagliato sposta tutta la quantizzazione a valle.
+#                        # Si appoggia a PyTorch, gia' installato da Demucs.
+#                        # Installazione (non e' su PyPI):
+#                        #   pip install tqdm einops soxr rotary-embedding-torch
+#                        #   pip install https://github.com/CPJKU/beat_this/archive/main.zip
+#                        # NB: madmom, la scelta storica per questo compito, e'
+#                        # stato valutato e scartato: la versione su PyPI regge
+#                        # solo Python < 3.10 e numpy < 1.20.

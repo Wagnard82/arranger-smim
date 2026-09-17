@@ -147,6 +147,7 @@ class Livello:
     cambi_posizione: bool
     tastiera_max_semitoni: int    # apertura massima della mano al pianoforte
     capotasto_max: int            # tasto massimo utilizzabile sulla chitarra
+    fiato_max: float = 6.0        # quarti di suono continuo prima del respiro
     note: str = ""
 
 
@@ -154,19 +155,19 @@ LIVELLI: Dict[str, Livello] = {
     "1a Media": Livello(
         nome="1a Media", durata_minima=1.0, salto_massimo=7, alterazioni=False,
         accordi_max=2, arpeggi=False, sincopi=False, cambi_posizione=False,
-        tastiera_max_semitoni=9, capotasto_max=3,
+        tastiera_max_semitoni=9, capotasto_max=3, fiato_max=4.0,
         note="Prima posizione, ritmi base (minime/semiminime), bicordi, salti entro la 5a.",
     ),
     "2a Media": Livello(
         nome="2a Media", durata_minima=0.5, salto_massimo=12, alterazioni=True,
         accordi_max=3, arpeggi=True, sincopi=False, cambi_posizione=False,
-        tastiera_max_semitoni=12, capotasto_max=5,
+        tastiera_max_semitoni=12, capotasto_max=5, fiato_max=6.0,
         note="Note alterate, arpeggi base, crome, prime estensioni d'ottava.",
     ),
     "3a Media": Livello(
         nome="3a Media", durata_minima=0.25, salto_massimo=19, alterazioni=True,
         accordi_max=6, arpeggi=True, sincopi=True, cambi_posizione=True,
-        tastiera_max_semitoni=14, capotasto_max=9,
+        tastiera_max_semitoni=14, capotasto_max=9, fiato_max=8.0,
         note="Semicrome, cambi di posizione, accordi completi, salti ampi, sincopi.",
     ),
 }

@@ -805,6 +805,93 @@ def comping_chitarra(analisi: Analisi, st: Strumento, liv: str,
     return ev
 
 
+def linea_dalla_figurazione(analisi: Analisi, st: Strumento, liv: str,
+                            a: float, b: float, misure: List[Misura],
+                            riferimento: Optional[int] = None) -> List[Evento]:
+    """
+    Ricava una parte monodica da cio' che l'originale scrive DAVVERO in quel
+    tratto, nel registro dello strumento.
+
+    E' il primo posto in cui guardare quando serve un accompagnamento: prima
+    di inventare un pad o un accordo a blocchi, si prende quello che c'e'
+    scritto. Se in quel registro non c'e' materiale sufficiente si restituisce
+    una lista vuota e il chiamante ripiega sull'invenzione.
+    """
+    lo, hi = st.ambito(liv)
+    dentro = [n for n in analisi.figurazione
+              if a - 1e-6 <= n.inizio < b - 1e-6]
+    if len(dentro) < 4:
+        return []
+    # si sceglie la fascia piu' vicina all'ambito dello strumento
+    centro = (lo + hi) / 2
+    vicine = sorted(dentro, key=lambda n: abs(n.midi - centro))
+    soglia = vicine[max(3, len(vicine) // 2)].midi
+    banda = [n for n in dentro if abs(n.midi - centro) <= abs(soglia - centro) + 12]
+    if len(banda) < 4:
+        return []
+    # gli attacchi troppo ravvicinati per il livello vengono uniti: questa
+    # linea e' accompagnamento, non deve essere piu' difficile della melodia
+    minimo = livello(liv).durata_minima
+    grezzi = sorted({round(n.inizio, 6) for n in banda})
+    attacchi: List[float] = []
+    for t in grezzi:
+        if not attacchi or t - attacchi[-1] >= minimo - 1e-6:
+            attacchi.append(t)
+    if len(attacchi) < 3:
+        return []
+    eventi: List[Evento] = []
+    for i, t in enumerate(attacchi):
+        gruppo = [n for n in banda if abs(n.inizio - t) < 1e-6]
+        scelta = min(gruppo, key=lambda n: abs(n.midi - centro))
+        fine = attacchi[i + 1] if i + 1 < len(attacchi) else b
+        m = next((x for x in misure if x.inizio - 1e-6 <= t < x.fine - 1e-6), None)
+        if m is not None:
+            fine = min(fine, m.fine)
+        durata = min(max(scelta.durata, minimo), fine - t)
+        if durata < minimo - 1e-6:
+            # il tratto disponibile e' piu' corto del valore minimo: si
+            # allunga l'evento precedente invece di scrivere un valore
+            # che a questo livello non si sa leggere
+            if eventi:
+                eventi[-1].durata = max(eventi[-1].durata, fine - eventi[-1].inizio)
+            continue
+        eventi.append(Evento(inizio=t, durata=durata, altezze=[scelta.midi]))
+    # una sola ottava per l'intero tratto: spostare nota per nota
+    # riempirebbe la linea di salti che nell'originale non ci sono
+    scarto = _ottava_migliore([e.altezze[0] for e in eventi], lo, hi,
+                              preferito=_scarto_di_raccordo(eventi, riferimento,
+                                                            lo, hi))
+    for e in eventi:
+        e.altezze = [nota_in_ambito(e.altezze[0] + scarto, lo, hi)]
+    return _riduci_sovrapposizioni(eventi)
+
+
+def _scarto_di_raccordo(eventi: List[Evento], riferimento: Optional[int],
+                        lo: int, hi: int) -> int:
+    """
+    Ottava che avvicina l'inizio della linea alla nota che la precede: senza,
+    l'accompagnamento entra con un salto che nell'originale non c'e'.
+    """
+    if riferimento is None or not eventi:
+        return 0
+    primo = eventi[0].altezze[0]
+    migliore, distanza = 0, None
+    for delta in (0, 12, -12, 24, -24):
+        if not (lo <= primo + delta <= hi):
+            continue
+        d = abs(primo + delta - riferimento)
+        if distanza is None or d < distanza:
+            migliore, distanza = delta, d
+    return migliore
+
+
+def _riduci_sovrapposizioni(eventi: List[Evento]) -> List[Evento]:
+    for a, b in zip(eventi, eventi[1:]):
+        if a.fine > b.inizio + 1e-6:
+            a.durata = max(0.125, b.inizio - a.inizio)
+    return eventi
+
+
 def pad_fiati(analisi: Analisi, st: Strumento, liv: str, misure: List[Misura],
               grado: int = 1) -> List[Evento]:
     """Note lunghe tenute (una per misura) sul grado indicato dell'accordo."""
@@ -876,9 +963,40 @@ def pattern_percussioni(stile: str, liv: str, misure: List[Misura],
     return ev
 
 
-# --------------------------------------------------------------------------
-# Motore principale
-# --------------------------------------------------------------------------
+def pattern_da_batteria_reale(colpi, misure: List[Misura], liv: str) -> List[Evento]:
+    """
+    Riproduce il ritmo trascritto dalla traccia di batteria vera invece di un
+    pattern generico: e' il punto in cui l'importazione da audio da' qualcosa
+    che il motore, partendo da un pianoforte, non potrebbe mai avere.
+
+    `colpi` e' la lista di `ColpoBatteria` prodotta da
+    `audio_multitraccia.trascrivi_batteria`: qui si traduce in eventi, con al
+    massimo un colpo per la durata minima del livello, cosi' un pattern
+    fittissimo non diventi illeggibile in prima media.
+    """
+    if not colpi or not misure:
+        return []
+    minimo = livello(liv).durata_minima
+    fine = misure[-1].fine
+    ordinati = sorted(colpi, key=lambda c: c.inizio)
+    diradati = []
+    ultimo = None
+    for c in ordinati:
+        if ultimo is not None and c.inizio - ultimo < minimo - 1e-6:
+            continue
+        diradati.append(c)
+        ultimo = c.inizio
+
+    ev: List[Evento] = []
+    for i, c in enumerate(diradati):
+        prossimo = diradati[i + 1].inizio if i + 1 < len(diradati) else fine
+        durata = min(minimo, max(0.125, prossimo - c.inizio))
+        ev.append(Evento(inizio=c.inizio, durata=durata,
+                         altezze=[PERC_MIDI[c.strumento]]))
+    return ev
+
+
+
 
 
 def orchestra_tessitura(sp: Spartito, analisi: Analisi, parti: List[Parte],
@@ -1018,7 +1136,10 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
 
         # ---------------------------------------------------- percussioni
         if st.percussione:
-            ev = pattern_percussioni(cfg.stile, cfg.livello, misure, analisi.groove)
+            colpi_reali = getattr(sp, "colpi_batteria", None)
+            ev = (pattern_da_batteria_reale(colpi_reali, misure, cfg.livello)
+                  if colpi_reali else
+                  pattern_percussioni(cfg.stile, cfg.livello, misure, analisi.groove))
             p.eventi = _riempi_pause(ev, inizio, fine)
             applica_dinamiche(p, sp.dinamiche, sp.gradazioni)
             continue
@@ -1142,7 +1263,17 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
 
             else:  # armonia
                 if st.monofonico:
-                    ev.extend(pad_fiati(sotto, st, cfg.livello, mis_sub, grado=2))
+                    # prima si guarda che cosa scrive l'originale in quel
+                    # registro; solo se non basta si inventa un pad
+                    precedenti = [e for e in ev
+                                  if not e.pausa and e.fine <= a + 1e-6]
+                    riferimento = (max(precedenti, key=lambda e: e.fine).altezze[0]
+                                   if precedenti else None)
+                    dalla_musica = linea_dalla_figurazione(analisi, st,
+                                                           cfg.livello, a, b,
+                                                           mis_sub, riferimento)
+                    ev.extend(dalla_musica or
+                              pad_fiati(sotto, st, cfg.livello, mis_sub, grado=2))
                 else:
                     ev.extend(accordi_a_blocchi(sotto, st, cfg.livello, analisi.groove, mis_sub))
 
@@ -1209,6 +1340,7 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                                                   cfg.livello, misure))
 
     part.report.extend(alleggerisci_per_solista(part, analisi))
+    part.report.extend(riempi_silenzi_lunghi(part, analisi, cfg, misure))
     part.report.extend(resoconto_ruoli)
 
     return part
@@ -1279,6 +1411,95 @@ def applica_dinamiche(parte: Parte, dinamiche: List[Tuple[float, str]],
 # strumenti che, se portano la melodia, vanno protetti: hanno poca proiezione
 # e qualunque accompagnamento denso li copre
 SOLISTI_DEBOLI = {"chitarra", "glockenspiel", "metallofono", "violoncello"}
+
+
+def riempi_silenzi_lunghi(part: Partitura, analisi: Analisi,
+                          cfg: Configurazione, misure: List[Misura]
+                          ) -> List[str]:
+    """
+    Nessuno strumento resta fermo a lungo.
+
+    Un ragazzo che conta ottanta battute di pausa si distrae, e in un
+    arrangiamento scolastico una parte silenziosa e' una parte sprecata. Chi
+    non ha la melodia in quel tratto fa accompagnamento: una nota tenuta, un
+    arpeggio, gli accordi - quello che il brano offre in quel punto.
+
+    Restano i silenzi brevi, che sono respiro e servono.
+    """
+    note_report: List[str] = []
+    if not cfg.riempi_silenzi or not misure:
+        return note_report
+    durata_misura = misure[0].durata_piena
+    soglia = max(1, cfg.silenzio_massimo_misure) * durata_misura
+
+    for p in part.parti:
+        st = strumento(p.strumento)
+        if st.percussione or p.righi == 2:
+            continue          # le percussioni hanno il loro pattern, il piano suona
+        riempiti = 0
+        for rigo in sorted({e.rigo for e in p.eventi}):
+            for (a, b) in _pause_lunghe(p, rigo, soglia):
+                sotto = _sotto_analisi(analisi, a, b)
+                if not sotto.armonia:
+                    continue
+                mis_sub = [m for m in misure if m.inizio < b and m.fine > a]
+                eventi = _accompagnamento_di_riserva(sotto, st, cfg, mis_sub, p)
+                eventi = [e for e in eventi if a - 1e-6 <= e.inizio < b - 1e-6]
+                for e in eventi:
+                    e.rigo = rigo
+                    e.durata = min(e.durata, b - e.inizio)
+                if eventi and _sostituisci_span(p, eventi):
+                    riempiti += 1
+        if riempiti:
+            note_report.append(
+                f"[Silenzi] {p.nome}: {riempiti} pause lunghe riempite con "
+                f"l'accompagnamento.")
+    return note_report
+
+
+def _pause_lunghe(parte: Parte, rigo: int, soglia: float
+                  ) -> List[Tuple[float, float]]:
+    """Tratti in cui la parte tace per piu' della soglia."""
+    flusso = [e for e in parte.eventi if e.rigo == rigo]
+    tratti: List[List[float]] = []
+    for e in flusso:
+        if not e.pausa:
+            tratti.append(None) if False else None
+            continue
+        if tratti and abs(tratti[-1][1] - e.inizio) < 1e-6:
+            tratti[-1][1] = e.fine
+        else:
+            tratti.append([e.inizio, e.fine])
+    return [(a, b) for a, b in tratti if b - a >= soglia - 1e-6]
+
+
+def _accompagnamento_di_riserva(sotto: Analisi, st: Strumento,
+                                cfg: Configurazione, misure: List[Misura],
+                                p: Parte) -> List[Evento]:
+    """Che cosa far suonare a chi in quel tratto non ha nulla da fare."""
+    if p.strumento == "chitarra":
+        ritmo = ritmo_figurazione(sotto.figurazione, misure[0].inizio,
+                                  misure[-1].fine) if misure else []
+        composto = bool(misure) and misure[0].composto
+        if ritmo:
+            return accordi_su_ritmo(sotto, st, cfg.livello,
+                                    dirada_ritmo(ritmo, misure,
+                                                 per_movimento=3 if composto else 2),
+                                    arpeggia=True)
+        return arpeggio(sotto, st, cfg.livello, passo=0.5)
+    if st.monofonico:
+        if misure:
+            dalla_musica = linea_dalla_figurazione(sotto, st, cfg.livello,
+                                                   misure[0].inizio,
+                                                   misure[-1].fine, misure)
+            if dalla_musica:
+                return dalla_musica
+        # niente di utile scritto qui: nota tenuta dell'armonia, che sostiene
+        # senza coprire chi ha il tema
+        return pad_fiati(sotto, st, cfg.livello, misure,
+                         grado=1 + (p.variante % 2))
+    return accordi_a_blocchi(sotto, st, cfg.livello, sotto.groove, misure,
+                             senza_primo_movimento=False)
 
 
 def alleggerisci_per_solista(part: Partitura, analisi: Analisi) -> List[str]:

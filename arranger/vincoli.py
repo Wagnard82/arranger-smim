@@ -508,9 +508,10 @@ def filtro_incroci(part: Partitura) -> None:
 
 
 # La destra non scende sotto il SOL sotto il pentagramma in chiave di violino
-# (Sol3), la sinistra non sale sopra il Do5: oltre quei limiti la scrittura si
+# (Sol3), la sinistra non sale sopra il MI sopra il pentagramma in chiave di
+# basso (Mi4): oltre quei limiti la scrittura si
 # riempie di tagli addizionali e le mani si accavallano.
-AMBITO_MANI = {1: (55, 96), 2: (28, 72)}
+AMBITO_MANI = {1: (55, 96), 2: (28, 64)}
 
 
 def filtro_mani(part: Partitura) -> None:
@@ -542,6 +543,189 @@ def filtro_mani(part: Partitura) -> None:
             e.altezze = sorted(set(nuove))
 
 
+def filtro_divisi(part: Partitura) -> None:
+    """
+    I leggii successivi al primo devono essere PIU' FACILI e non suonare mai
+    sopra il primo.
+
+    In una sezione scolastica il secondo e il terzo leggio sono quasi sempre
+    gli allievi meno avanti: se scrivi loro una parte piu' acuta e piu' mossa
+    della prima, in prova non regge. Quindi: niente note sopra il compagno di
+    sezione che li precede, e valori ritmici piu' larghi.
+    """
+    L = livello(part.livello)
+    gruppi: Dict[str, List[Parte]] = {}
+    for p in part.parti:
+        gruppi.setdefault(p.strumento, []).append(p)
+
+    for chiave, parti in gruppi.items():
+        if len(parti) < 2:
+            continue
+        st = strumento(chiave)
+        if st.percussione:
+            continue
+        lo, hi = st.ambito(part.livello)
+        parti.sort(key=lambda p: p.variante)
+
+        for indice in range(1, len(parti)):
+            sotto = parti[indice]
+            sopra = parti[indice - 1]
+            _sotto_il_compagno(part, sotto, sopra, lo, hi)
+            if sotto.ruolo != "melodia":
+                _semplifica_ritmo(part, sotto, L.durata_minima * 2)
+
+
+def _sotto_il_compagno(part: Partitura, sotto: Parte, sopra: Parte,
+                       lo: int, hi: int) -> None:
+    """Abbassa gli eventi di `sotto` che suonano sopra `sopra`."""
+    riferimenti = [e for e in sopra.eventi if not e.pausa]
+    corretti = 0
+    for e in sotto.eventi:
+        if e.pausa:
+            continue
+        simultanei = [r for r in riferimenti
+                      if r.inizio < e.fine - 1e-6 and r.fine > e.inizio + 1e-6]
+        if not simultanei:
+            continue
+        tetto = max(max(r.altezze) for r in simultanei)
+        if max(e.altezze) <= tetto:
+            continue
+        nuove = list(e.altezze)
+        while max(nuove) > tetto and min(nuove) - 12 >= lo:
+            nuove = [a - 12 for a in nuove]
+        nuove = [min(a, tetto) for a in nuove]
+        if nuove != e.altezze:
+            e.altezze = sorted(set(max(lo, a) for a in nuove))
+            corretti += 1
+    if corretti:
+        part.report.append(
+            f"[Divisi] {sotto.nome}: {corretti} note che superavano "
+            f"{sopra.nome} -> riportate sotto.")
+
+
+def _semplifica_ritmo(part: Partitura, p: Parte, minimo: float) -> None:
+    """Allarga i valori troppo brevi per un leggio secondario."""
+    if minimo <= 0:
+        return
+    semplificati = 0
+    for rigo in sorted({e.rigo for e in p.eventi}):
+        flusso = [e for e in p.eventi if e.rigo == rigo]
+        fusi: List[Evento] = []
+        for e in flusso:
+            if (fusi and e.durata < minimo - 1e-6 and not e.letterale
+                    and _stessa_misura(part, fusi[-1], e)):
+                prec = fusi[-1]
+                if prec.pausa == e.pausa and prec.altezze == e.altezze:
+                    prec.durata += e.durata
+                    continue
+                if not e.pausa and prec.durata >= minimo:
+                    prec.durata += e.durata
+                    semplificati += 1
+                    continue
+            fusi.append(e)
+        altri = [e for e in p.eventi if e.rigo != rigo]
+        p.eventi = sorted(altri + fusi, key=lambda x: (x.rigo, x.inizio))
+    if semplificati:
+        part.report.append(
+            f"[Divisi] {p.nome}: {semplificati} valori allargati "
+            f"(leggio secondario, parte piu' facile).")
+
+
+def _stessa_misura(part: Partitura, a: Evento, b: Evento) -> bool:
+    return _indice_misura(part.misure, a.inizio) == _indice_misura(part.misure,
+                                                                   b.inizio)
+
+
+def filtro_respiro(part: Partitura) -> None:
+    """
+    I fiati devono respirare.
+
+    Due limiti, entrambi necessari: nessuna nota tenuta oltre il massimo del
+    livello, e nessun tratto suonato di fila oltre quel massimo. Un ragazzo di
+    prima media che trova una legatura di otto battute non la esegue: si ferma
+    dove capita, e la sezione va fuori insieme.
+    """
+    L = livello(part.livello)
+    limite = L.fiato_max
+    if limite <= 0:
+        return
+    respiro = 0.5
+
+    for p in part.parti:
+        st = strumento(p.strumento)
+        if st.famiglia not in ("fiati", "ottoni"):
+            continue
+        nuovi: List[Evento] = []
+        suonato = 0.0
+        accorciate = 0
+        for e in sorted(p.eventi, key=lambda x: x.inizio):
+            if e.pausa:
+                suonato = 0.0
+                nuovi.append(e)
+                continue
+
+            # 1) nota singola troppo lunga: si accorcia e si apre il respiro
+            if e.durata > limite + 1e-6:
+                tenuta = max(respiro, limite - respiro)
+                nuovi.append(Evento(inizio=e.inizio, durata=tenuta,
+                                    altezze=list(e.altezze),
+                                    articolazione=e.articolazione,
+                                    dinamica=e.dinamica, sigla=e.sigla,
+                                    rigo=e.rigo))
+                nuovi.append(Evento(inizio=e.inizio + tenuta,
+                                    durata=e.durata - tenuta, altezze=[],
+                                    rigo=e.rigo))
+                accorciate += 1
+                suonato = 0.0
+                continue
+
+            # 2) troppo tempo di fila senza staccare. Si accorcia solo se
+            #    quello che resta e' ancora un valore leggibile al livello:
+            #    meglio una frase un filo piu' lunga di una croma isolata in
+            #    prima media.
+            if suonato + e.durata > limite + 1e-6 and e.durata <= respiro:
+                # troppo corta per essere accorciata: diventa lei il respiro.
+                # Perdere una nota d'accompagnamento e' meglio di una sezione
+                # di fiati che va fuori a meta' frase.
+                if p.ruolo != "melodia":
+                    nuovi.append(Evento(inizio=e.inizio, durata=e.durata,
+                                        altezze=[], rigo=e.rigo))
+                    accorciate += 1
+                    suonato = 0.0
+                    continue
+            # per il respiro si accetta un valore piu' breve del minimo del
+            # livello: "semiminima + pausa di croma" si legge benissimo, ed e'
+            # esattamente cio' che il fiato fa da solo per prendere aria
+            if (suonato + e.durata > limite + 1e-6
+                    and e.durata - respiro >= 0.25 - 1e-6):
+                nuovi.append(Evento(inizio=e.inizio, durata=e.durata - respiro,
+                                    altezze=list(e.altezze),
+                                    articolazione=e.articolazione,
+                                    dinamica=e.dinamica, sigla=e.sigla,
+                                    rigo=e.rigo))
+                nuovi.append(Evento(inizio=e.fine - respiro, durata=respiro,
+                                    altezze=[], rigo=e.rigo))
+                accorciate += 1
+                suonato = 0.0
+                continue
+
+            if suonato + e.durata > limite * 1.5 and p.ruolo != "melodia":
+                # ultima risorsa: si sacrifica questa nota per far respirare
+                nuovi.append(Evento(inizio=e.inizio, durata=e.durata,
+                                    altezze=[], rigo=e.rigo))
+                accorciate += 1
+                suonato = 0.0
+                continue
+            suonato += e.durata
+            nuovi.append(e)
+        p.eventi = sorted(nuovi, key=lambda x: (x.rigo, x.inizio))
+        if accorciate:
+            part.report.append(
+                f"[Respiro] {p.nome}: {accorciate} punti in cui la parte e' "
+                f"stata accorciata per far respirare "
+                f"(massimo {limite:g} quarti di fila).")
+
+
 def valida(part: Partitura) -> List[str]:
     """Esegue tutti i filtri nell'ordine corretto e restituisce il report."""
     filtro_polifonia(part)
@@ -550,9 +734,11 @@ def valida(part: Partitura) -> List[str]:
     filtro_salti(part)
     filtro_idiomatico(part)
     filtro_mani(part)
+    filtro_divisi(part)
     filtro_incroci(part)
     filtro_estensione(part)     # secondo passaggio dopo le modifiche idiomatiche
     filtro_ritmico(part)
+    filtro_respiro(part)
     for p in part.parti:
         p.eventi.sort(key=lambda e: (e.rigo, e.inizio))
     return part.report

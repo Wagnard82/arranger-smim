@@ -14,6 +14,7 @@ presente puo' essere usato come fallback per file esotici.
 
 from __future__ import annotations
 
+import glob
 import io
 import os
 import re
@@ -83,6 +84,56 @@ def _tag(el: ET.Element) -> str:
 
 def _testo(el: Optional[ET.Element], default: str = "") -> str:
     return (el.text or default).strip() if el is not None and el.text else default
+
+
+def _classifica_parti(parti: List[ET.Element]) -> Tuple[str, Optional[int]]:
+    """
+    Capisce che tipo di spartito e' stato caricato.
+
+    Due casi ricorrono nella pratica: la riduzione pianistica su due righi, e
+    la parte solista (voce, flauto, violino...) con l'accompagnamento di
+    pianoforte sotto. Nel secondo caso la melodia non va cercata: e' scritta,
+    ed e' la parte del solista.
+
+    Il riconoscimento e' strutturale, non si fida dei nomi: una parte solista
+    ha un rigo solo e suona quasi sempre una nota per volta; il pianoforte ha
+    due righi (o comunque una scrittura densa).
+    """
+    if len(parti) < 2:
+        return "pianistico", None
+
+    profili = []
+    for parte in parti:
+        righi = set()
+        attacchi: Dict[float, int] = {}
+        totale = 0
+        for mis in parte.findall("./{*}measure"):
+            for el in mis.findall("./{*}note"):
+                if el.find("./{*}rest") is not None or el.find("./{*}grace") is not None:
+                    continue
+                righi.add(_testo(el.find("./{*}staff"), "1"))
+                chiave = _testo(el.find("./{*}voice"), "1") + _testo(
+                    el.find("./{*}duration"), "0")
+                attacchi[chiave] = attacchi.get(chiave, 0) + 1
+                totale += 1
+        accordi = sum(1 for mis in parte.findall("./{*}measure")
+                      for el in mis.findall("./{*}note")
+                      if el.find("./{*}chord") is not None)
+        profili.append({"righi": len(righi), "note": totale,
+                        "accordi": accordi})
+
+    def e_solista(p: dict) -> bool:
+        return (p["righi"] <= 1 and p["note"] > 0
+                and p["accordi"] <= p["note"] * 0.15)
+
+    def e_tastiera(p: dict) -> bool:
+        return p["righi"] >= 2 or p["accordi"] > p["note"] * 0.25
+
+    solisti = [i for i, p in enumerate(profili) if e_solista(p)]
+    tastiere = [i for i, p in enumerate(profili) if e_tastiera(p)]
+    if len(solisti) == 1 and tastiere and solisti[0] not in tastiere:
+        return "solista_e_piano", solisti[0]
+    return "pianistico", None
 
 
 def _griglia_misure(parti: List[ET.Element]) -> List[Tuple[float, int, int, int, bool]]:
@@ -200,6 +251,7 @@ def da_musicxml(percorso: str) -> Spartito:
     if not parti:
         raise ValueError("Nessuna <part> trovata nel MusicXML")
 
+    tipo_spartito, indice_solista = _classifica_parti(parti)
     griglia = _griglia_misure(parti)
     inizi: List[float] = []
     t = 0.0
@@ -283,7 +335,11 @@ def da_musicxml(percorso: str) -> Spartito:
                             octv = int(_testo(p.find("./{*}octave"), "4"))
                             midi = (octv + 1) * 12 + PASSI.get(step, 0) + alter
                             rigo = int(_testo(el.find("./{*}staff"), "1"))
-                            if len(parti) > 1 and rigo == 1:
+                            if tipo_spartito == "solista_e_piano":
+                                # il solista sta sul rigo superiore, il
+                                # pianoforte tiene i suoi due righi
+                                rigo = 1 if idx_parte == indice_solista else rigo
+                            elif len(parti) > 1 and rigo == 1:
                                 rigo = 1 if idx_parte == 0 else 2
                             voce = int(_testo(el.find("./{*}voice"), "1"))
                             tie_start = any(x.get("type") == "start"
@@ -298,13 +354,15 @@ def da_musicxml(percorso: str) -> Spartito:
                                         midi=midi, inizio=offset_misura + inizio_rel,
                                         durata=dur_tagliata, rigo=min(2, max(1, rigo)),
                                         voce=voce, legata_dopo=tie_start,
-                                        legata_prima=tie_stop))
+                                        legata_prima=tie_stop, origine=idx_parte))
                     if not accordo:
                         ultimo_inizio = cursore
                         cursore += dur
 
     sp.misure = misure
     sp.note = tutte
+    sp.tipo = tipo_spartito
+    sp.parte_solista = indice_solista
     if aperta is not None and misure:
         forcelle.append((aperta[0], misure[-1].fine, aperta[1]))
     sp.dinamiche = sorted(set(dinamiche))
@@ -665,20 +723,61 @@ def scarica_youtube(url: str, cartella: str = ".", formato: str = "wav") -> str:
     return max(audio, key=os.path.getsize)
 
 
-def audio_in_midi(percorso_audio: str, cartella: str = ".") -> str:
-    """Trascrizione audio->MIDI con Spotify Basic Pitch (import pigro)."""
+def _pulisci_output_precedenti(cartella: str, base: str) -> None:
+    """
+    Toglie di mezzo un MIDI prodotto da Basic Pitch in una sessione
+    precedente con lo stesso nome.
+
+    Basic Pitch si rifiuta di sovrascrivere un file gia' presente. Il
+    problema si presenta soprattutto con l'importazione multitraccia: Demucs
+    chiama le tracce separate sempre `vocals.wav`, `bass.wav`, `other.wav`,
+    a prescindere dal brano, quindi ogni nuova importazione da audio scrive
+    negli stessi percorsi della precedente e la trascrizione fallisce dalla
+    seconda volta in poi. Qui si ripulisce prima di trascrivere.
+    """
+    for pregresso in (glob.glob(os.path.join(cartella, base + "*.mid"))
+                      + glob.glob(os.path.join(cartella, base + "*.midi"))):
+        try:
+            os.remove(pregresso)
+        except OSError:
+            pass
+
+
+def audio_in_midi(percorso_audio: str, cartella: str = ".",
+                  midi_tempo: Optional[float] = None) -> str:
+    """
+    Trascrizione audio->MIDI con Spotify Basic Pitch (import pigro).
+
+    `midi_tempo`: Basic Pitch non conosce il tempo del brano, ma per
+    scrivere un file MIDI deve comunque scegliere una conversione fra
+    secondi e tick — lo fa con un tempo fisso (di default 120 bpm) che non
+    ha alcun rapporto con il tempo reale del pezzo. Per l'uso normale (un
+    unico file audio ridotto a pianoforte) questo non conta, perche' tutto
+    il MIDI risultante viene poi riquantizzato da capo sulla sua stessa
+    griglia interna. Ma quando le "battute" di questo MIDI devono restare
+    confrontabili con quelle di un'altra traccia scandita con un orologio
+    diverso — come nella separazione multitraccia, dove batteria e voce
+    vanno allineate alla stessa linea del tempo — serve un tempo esplicito e
+    noto. Passando `midi_tempo=60.0` un quarto nel MIDI dura esattamente un
+    secondo: le "durate in quarti" lette da questo file sono, senza alcuna
+    ambiguita', durate in secondi.
+    """
     try:
         from basic_pitch.inference import predict_and_save  # type: ignore
         from basic_pitch import ICASSP_2022_MODEL_PATH  # type: ignore
     except ImportError as e:  # pragma: no cover
         raise RuntimeError(istruzioni_dipendenze(["basic-pitch"])) from e
     os.makedirs(cartella, exist_ok=True)
+    base = os.path.splitext(os.path.basename(percorso_audio))[0]
+    _pulisci_output_precedenti(cartella, base)
     try:
+        argomenti = dict(model_or_model_path=ICASSP_2022_MODEL_PATH)
+        if midi_tempo is not None:
+            argomenti["midi_tempo"] = midi_tempo
         predict_and_save([percorso_audio], cartella, True, False, False, False,
-                         model_or_model_path=ICASSP_2022_MODEL_PATH)
+                         **argomenti)
     except Exception as e:
         raise RuntimeError(f"Trascrizione audio fallita: {e}") from e
-    base = os.path.splitext(os.path.basename(percorso_audio))[0]
     trovati = [os.path.join(cartella, f) for f in os.listdir(cartella)
                if f.startswith(base) and f.lower().endswith((".mid", ".midi"))]
     if not trovati:
