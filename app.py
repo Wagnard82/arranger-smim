@@ -25,7 +25,6 @@ from arranger import ia
 from arranger.anteprima import html_anteprima
 from arranger.modello import nome_it
 from arranger.orchestratore import costruisci_parti
-from arranger.ingestione import stato_dipendenze_omr
 from arranger.strumenti import LIVELLI, ORDINE_PARTITURA, REGISTRO, livello, strumento
 from arranger.versione import COMPILATO, DATA, NOVITA, PRECEDENTE, VERSIONE
 
@@ -117,6 +116,47 @@ with st.sidebar:
     st.header("2 · Livello didattico")
     liv = st.radio("Classe", list(LIVELLI.keys()), index=0, label_visibility="collapsed")
     st.info(livello(liv).note)
+
+    # Livelli per singolo strumento. Le classi eterogenee nella scuola media
+    # sono la norma piu' che l'eccezione: capita di avere un violino al terzo
+    # anno di strumento accanto a un flauto che ha cominciato a ottobre. Con
+    # un livello unico si e' costretti a scegliere fra annoiare l'uno e
+    # travolgere l'altro.
+    livelli_strumenti = {}
+    attivi = [k for k in ORDINE_PARTITURA if formazione.get(k, 0) > 0]
+    if attivi:
+        with st.expander("Livelli diversi per strumento (classi eterogenee)"):
+            st.caption(
+                "Lascia «come la classe» dove non serve distinguere. Le "
+                "indicazioni date qui valgono per tutto: estensione, valori "
+                "ritmici, alterazioni, respiro, e anche la scelta di chi "
+                "porta la melodia — che va a chi puo' davvero eseguirla.")
+            for chiave in attivi:
+                nome_st = REGISTRO[chiave].nome
+                quanti = formazione[chiave]
+                scelta = st.selectbox(
+                    nome_st + (f" (tutti i {quanti})" if quanti > 1 else ""),
+                    ["come la classe"] + list(LIVELLI.keys()),
+                    key=f"liv_{chiave}")
+                if scelta != "come la classe":
+                    livelli_strumenti[chiave] = scelta
+                # Dentro la stessa sezione i leggii sono spesso di livello
+                # diverso: il secondo violino e' quasi sempre l'allievo meno
+                # avanti, e poterlo dire e' piu' utile che dover scegliere un
+                # livello medio per tutta la sezione.
+                if quanti > 1:
+                    for i in range(1, quanti + 1):
+                        id_parte = f"{chiave}{i}"
+                        s2 = st.selectbox(
+                            f"   └ {REGISTRO[chiave].abbrev} {i}",
+                            ["come lo strumento"] + list(LIVELLI.keys()),
+                            key=f"liv_{id_parte}")
+                        if s2 != "come lo strumento":
+                            livelli_strumenti[id_parte] = s2
+            if livelli_strumenti:
+                st.success(
+                    f"{len(livelli_strumenti)} indicazioni di livello "
+                    "specifiche attive.")
 
     st.header("3 · Stile")
     stile = st.selectbox(
@@ -259,97 +299,51 @@ with st.sidebar:
 
 
 # ==========================================================================
-# MODULO 1 - Ingestione (solo spartiti pianistici)
+# MODULO 1 - Ingestione (solo MusicXML)
 # ==========================================================================
 
 with PRINCIPALE:
     st.subheader("Spartito di partenza")
     st.info(
-        "**Carica uno spartito per PIANOFORTE**: MusicXML (`.xml`, `.musicxml`, "
-        "`.mxl`) oppure MIDI (`.mid`). Il file deve contenere una riduzione "
-        "pianistica su due righi, chiave di violino e di basso, con melodia, "
-        "armonia e basso gia' scritti per pianoforte. Partiture gia' orchestrate, "
-        "parti staccate o file su un rigo solo danno risultati scadenti.")
-
-    _omr = stato_dipendenze_omr()
-    _tipi = ["xml", "musicxml", "mxl", "mid", "midi"]
-    if any(_omr.values()):
-        _tipi.append("pdf")
+        "**Carica un MusicXML** (`.xml`, `.musicxml`, `.mxl`), in una di "
+        "queste tre forme — l'arrangiatore le riconosce da solo:\n\n"
+        "- **riduzione per pianoforte** su due righi, con melodia, armonia e "
+        "basso;\n"
+        "- **parte solista + pianoforte** (voce, flauto, violino... con "
+        "l'accompagnamento sotto);\n"
+        "- **lead sheet**: la sola melodia su un rigo, con le **sigle** degli "
+        "accordi sopra (come nei canzonieri). Basso e accompagnamento vengono "
+        "costruiti dalle sigle.\n\n"
+        "Partiture gia' orchestrate o parti staccate danno risultati "
+        "scadenti.")
 
     col1, col2 = st.columns([2, 1])
     with col1:
         caricato = st.file_uploader(
-            "Spartito pianistico (MusicXML o MIDI)"
-            + (" o PDF" if any(_omr.values()) else ""), type=_tipi)
-        if not any(_omr.values()):
-            with st.expander("Ho solo un PDF: come faccio?"):
-                st.markdown(
-                    "Il riconoscimento ottico non e' attivo su questa istanza "
-                    "(richiede troppa memoria). Converti il PDF in MusicXML con "
-                    "uno di questi, poi carica il file ottenuto:\n\n"
-                    "- **MuseScore 4** (gratuito): *File > Importa PDF*;\n"
-                    "- **Audiveris** (gratuito, open source): il piu' accurato "
-                    "sulla musica stampata;\n"
-                    "- **PlayScore 2** o **Soundslice**: servizi online.\n\n"
-                    "Ricontrolla sempre il MusicXML prodotto: il riconoscimento "
-                    "ottico sbaglia spesso alterazioni, voci e legature, e gli "
-                    "errori si propagano all'arrangiamento.")
+            "Spartito in MusicXML", type=["xml", "musicxml", "mxl"])
+        with st.expander("Ho un MIDI, un PDF o un audio: come faccio?"):
+            st.markdown(
+                "L'arrangiatore legge solo MusicXML: e' l'unico formato che "
+                "porta con se' metro, tonalita', sigle, dinamiche e voci "
+                "senza doverle indovinare. Gli altri formati vanno prima "
+                "portati in notazione — e li' conviene controllarli, perche' "
+                "ogni errore si propaga all'arrangiamento:\n\n"
+                "- **MIDI**: aprilo in **MuseScore 4** o **Dorico**, sistema "
+                "metro e valori, poi *Esporta > MusicXML*;\n"
+                "- **PDF**: *File > Importa PDF* in **MuseScore 4**, oppure "
+                "**Audiveris** (gratuito, il piu' accurato sulla musica "
+                "stampata); ricontrolla alterazioni e legature;\n"
+                "- **audio**: trascrivi la melodia e scrivi le sigle — "
+                "il **lead sheet** e' il modo piu' rapido per arrangiare un "
+                "brano che hai solo in registrazione.")
     with col2:
-        demo = st.checkbox("Prova con il brano dimostrativo",
-                           help="Inno alla Gioia, con anacrusi")
-
-    # ---------------------------------------------------------- audio multitraccia
-    # Visibile solo se le dipendenze pesanti (demucs, basic-pitch) sono
-    # installate: sull'istanza pubblica restano assenti e questa sezione non
-    # compare, coerentemente con la scelta di non esporre l'ingresso audio
-    # li' (la trascrizione resta la parte meno affidabile della catena).
-    from arranger import audio_multitraccia as am
-    _stato_audio = am.stato_dipendenze()
-    caricato_audio = None
-    usa_audio = False
-    bpm_manuale = None
-    if _stato_audio["demucs"] and _stato_audio["basic_pitch"]:
-        with st.expander("🎤 Oppure importa da una registrazione audio"):
-            st.caption(
-                "Separa voce, basso, batteria e resto (Demucs), trascrive "
-                "ogni traccia e usa la voce come melodia, il basso come "
-                "sostegno grave e base per l'armonia, la batteria come "
-                "pattern ritmico reale. Ci vogliono alcuni minuti su CPU.")
-            caricato_audio = st.file_uploader(
-                "Registrazione audio (mp3, wav, m4a...)",
-                type=["mp3", "wav", "m4a", "flac", "ogg"])
-            usa_audio = caricato_audio is not None
-            if not _stato_audio["librosa"]:
-                st.caption("`librosa` non installato: la batteria non verra' "
-                           "trascritta, le percussioni useranno comunque un "
-                           "pattern automatico. Anche il tempo del brano "
-                           "non potra' essere rilevato: indicalo qui sotto.")
-            if _stato_audio["librosa"] and not _stato_audio.get("beat_this"):
-                st.caption(
-                    "Il tempo verra' stimato con `librosa`. Installando "
-                    "`beat_this` la stima diventa piu' affidabile sui brani "
-                    "dal ritmo sincopato, dove librosa tende ad agganciarsi "
-                    "a una suddivisione sbagliata — e un tempo sbagliato "
-                    "sposta tutta la quantizzazione. Si appoggia a PyTorch, "
-                    "che Demucs ha gia' installato.")
-            bpm_auto = st.checkbox(
-                "Rileva il tempo (bpm) automaticamente", value=True,
-                disabled=not _stato_audio["librosa"],
-                help=("Nessun rilevatore automatico e' infallibile. Con "
-                      "`beat_this` installato la stima e' piu' solida; con "
-                      "il solo librosa l'errore piu' comune e' agganciarsi a "
-                      "una suddivisione sbagliata del battito, specie sui "
-                      "ritmi sincopati o sulle registrazioni datate. Se "
-                      "conosci il tempo del brano, disattiva e indicalo: "
-                      "resta sempre la scelta piu' sicura."))
-            bpm_manuale = None
-            if not bpm_auto or not _stato_audio["librosa"]:
-                bpm_manuale = st.number_input(
-                    "Tempo del brano (bpm)", min_value=20.0, max_value=300.0,
-                    value=100.0, step=1.0,
-                    help="Se non lo conosci con precisione, un valore "
-                         "approssimativo va gia' meglio di un rilevamento "
-                         "automatico sbagliato di un'ottava.")
+        demo = st.radio(
+            "Oppure prova un esempio",
+            ["nessuno", "Inno alla gioia (pianoforte)",
+             "Inno alla gioia (lead sheet)"],
+            help="Lo stesso brano in due forme: utile per vedere come "
+                 "cambia l'arrangiamento quando il basso e l'accompagnamento "
+                 "nascono dalle sigle invece che dalla parte di pianoforte.")
 
     avvia = st.button("🎻 Genera arrangiamento", type="primary", use_container_width=True)
 
@@ -362,23 +356,24 @@ with PRINCIPALE:
             st.error("Seleziona almeno uno strumento nella formazione.")
             st.stop()
 
-        if usa_audio:
-            sorgente = os.path.join(CARTELLA, caricato_audio.name)
-            with open(sorgente, "wb") as f:
-                f.write(caricato_audio.getbuffer())
-        elif demo:
+        if demo == "Inno alla gioia (pianoforte)":
             from esempi import genera_esempi
             sorgente = genera_esempi.inno_alla_gioia(
                 os.path.join(CARTELLA, "inno_alla_gioia.xml"))
+        elif demo == "Inno alla gioia (lead sheet)":
+            from esempi import genera_esempi
+            sorgente = genera_esempi.lead_sheet(
+                os.path.join(CARTELLA, "lead_sheet.xml"))
         elif caricato is not None:
             sorgente = os.path.join(CARTELLA, caricato.name)
             with open(sorgente, "wb") as f:
                 f.write(caricato.getbuffer())
         else:
-            st.error("Carica un file oppure spunta il brano dimostrativo.")
+            st.error("Carica un MusicXML oppure scegli uno degli esempi.")
             st.stop()
 
         cfg = Configurazione(formazione={k: v for k, v in formazione.items() if v > 0},
+                             livelli_strumenti=livelli_strumenti,
                              livello=liv, stile=stile, trasporto=trasporto,
                              strumenti_melodia=scelte_melodia,
                              staffetta_melodia=staffetta, raddoppi_melodia=raddoppi,
@@ -392,18 +387,10 @@ with PRINCIPALE:
         for funzione in ia.FUNZIONI:
             setattr(cfg, f"ia_{funzione}", funzione in funzioni_ia)
 
-        with st.spinner("Separazione delle tracce e arrangiamento in corso "
-                        "(qualche minuto)..." if usa_audio else
-                        "Analisi e arrangiamento in corso..."):
+        with st.spinner("Analisi e arrangiamento in corso..."):
             try:
-                from arranger.pipeline import esegui_da_audio_multitraccia
-                if usa_audio:
-                    st.session_state["risultato"] = esegui_da_audio_multitraccia(
-                        sorgente, cfg, cartella=CARTELLA, esporta_ly=genera_ly,
-                        bpm_manuale=bpm_manuale)
-                else:
-                    st.session_state["risultato"] = esegui(
-                        sorgente, cfg, cartella=CARTELLA, esporta_ly=genera_ly)
+                st.session_state["risultato"] = esegui(
+                    sorgente, cfg, cartella=CARTELLA, esporta_ly=genera_ly)
             except Exception as e:
                 st.error(f"Non sono riuscito a elaborare il file: {e}")
                 with st.expander("Dettagli tecnici"):
@@ -480,40 +467,6 @@ with PRINCIPALE:
                     st.download_button("Scarica il sorgente LilyPond (.ly)", f.read(),
                                        file_name=os.path.basename(r.percorso_ly),
                                        mime="text/plain", use_container_width=True)
-            if r.percorso_tracce_debug and os.path.exists(r.percorso_tracce_debug):
-                st.divider()
-                st.markdown("**Tracce separate (debug)**")
-                st.caption(
-                    "Voce, basso, batteria e resto separate dall'audio, "
-                    "prima che l'arrangiatore le tocchi: apri questi file "
-                    "per valutare la qualita' della separazione e della "
-                    "trascrizione indipendentemente dall'arrangiamento "
-                    "finale.")
-                c1, c2 = st.columns(2)
-                with open(r.percorso_tracce_debug, "rb") as f:
-                    c1.download_button(
-                        "Quantizzate", f.read(),
-                        file_name=os.path.basename(r.percorso_tracce_debug),
-                        mime="application/vnd.recordare.musicxml+xml",
-                        use_container_width=True,
-                        help="Attacchi agganciati alla griglia: quello che "
-                             "usa l'arrangiatore.")
-                if r.percorso_tracce_grezze and os.path.exists(r.percorso_tracce_grezze):
-                    with open(r.percorso_tracce_grezze, "rb") as f:
-                        c2.download_button(
-                            "Non quantizzate", f.read(),
-                            file_name=os.path.basename(r.percorso_tracce_grezze),
-                            mime="application/vnd.recordare.musicxml+xml",
-                            use_container_width=True,
-                            help="Attacchi esattamente dove li ha sentiti la "
-                                 "trascrizione, senza aggancio alla griglia: "
-                                 "se un errore c'e' gia' qui, non e' colpa "
-                                 "della quantizzazione.")
-                st.caption(
-                    "Confrontale: una nota sbagliata gia' nella versione "
-                    "non quantizzata viene dalla separazione o dalla "
-                    "trascrizione; se compare solo in quella quantizzata, "
-                    "e' l'aggancio alla griglia ad averla spostata o fusa.")
             st.caption("Il MusicXML si apre in MuseScore, Dorico, Sibelius e Finale: "
                        "nomi degli strumenti, graffa del pianoforte, armature "
                        "trasposte, dinamiche e articolazioni sono gia' impostate.")

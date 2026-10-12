@@ -15,7 +15,6 @@ import argparse
 import sys
 
 from arranger import Configurazione, esegui
-from arranger.pipeline import esegui_da_audio_multitraccia
 from arranger.strumenti import LIVELLI, REGISTRO
 
 
@@ -36,23 +35,24 @@ def organico(testo: str) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Arranger SMIM")
     ap.add_argument("sorgente",
-                    help="spartito pianistico (MusicXML, MIDI o PDF con OMR), "
-                         "oppure una registrazione audio con --audio")
-    ap.add_argument("--audio", action="store_true",
-                    help=("tratta 'sorgente' come registrazione audio: separa "
-                          "voce/basso/batteria/resto (richiede demucs e "
-                          "basic-pitch) invece di leggere uno spartito"))
-    ap.add_argument("--no-tracce-debug", action="store_true",
-                    help=("con --audio, non esportare il MusicXML di debug "
-                          "con le tracce separate"))
-    ap.add_argument("--bpm", type=float, default=None,
-                    help=("con --audio, forza il tempo del brano invece di "
-                          "rilevarlo in automatico: nessun rilevatore e' "
-                          "infallibile, e se conosci il tempo reale "
-                          "indicarlo qui e' sempre la scelta piu' sicura"))
+                    help="spartito in MusicXML (.xml, .musicxml, .mxl): "
+                         "riduzione per pianoforte, parte solista con "
+                         "pianoforte, oppure lead sheet (melodia con le "
+                         "sigle degli accordi)")
     ap.add_argument("--organico", type=organico, required=True,
                     help="es. flauto=2,violino=2,violoncello=1,chitarra=1")
     ap.add_argument("--livello", choices=list(LIVELLI), default="1a Media")
+    ap.add_argument("--livello-strumento", action="append", default=[],
+                    metavar="CHIAVE=LIVELLO", dest="livello_strumento",
+                    help="livello di un singolo strumento o leggio, "
+                         "ripetibile: --livello-strumento violino=\"3a Media\" "
+                         "--livello-strumento flauto2=\"1a Media\". La chiave "
+                         "puo' essere lo strumento (vale per tutti i suoi "
+                         "leggii) oppure l'id della parte come violino2 "
+                         "(vale solo per quel leggio). Serve alle classi "
+                         "eterogenee: senza, si e' costretti a scegliere fra "
+                         "annoiare chi suona da tre anni e travolgere chi ha "
+                         "cominciato a ottobre.")
     ap.add_argument("--stile", default="Normale",
                     choices=["Normale", "Cinematico", "Jazz", "Automatico"])
     ap.add_argument("--trasporto", type=int, default=0)
@@ -86,7 +86,19 @@ def main(argv=None) -> int:
     ap.add_argument("-o", "--output", default="output")
     a = ap.parse_args(argv)
 
+    livelli_strumenti = {}
+    for voce in a.livello_strumento:
+        if "=" not in voce:
+            ap.error(f"--livello-strumento vuole CHIAVE=LIVELLO, ricevuto: {voce}")
+        chiave, _, valore = voce.partition("=")
+        chiave, valore = chiave.strip(), valore.strip()
+        if valore not in LIVELLI:
+            ap.error(f"livello non riconosciuto: {valore}. "
+                     f"Ammessi: {', '.join(LIVELLI)}")
+        livelli_strumenti[chiave] = valore
+
     cfg = Configurazione(formazione=a.organico, livello=a.livello, stile=a.stile,
+                         livelli_strumenti=livelli_strumenti,
                          trasporto=a.trasporto, staffetta_melodia=not a.no_staffetta,
                          modo=a.modo, cambio_solista=a.cambio,
                          frasi_music21=a.frasi_music21,
@@ -99,13 +111,8 @@ def main(argv=None) -> int:
     for funzione in ("melodia", "riferimenti", "stile", "orchestrazione",
                      "armonia", "relazione"):
         setattr(cfg, f"ia_{funzione}", funzione in scelte)
-    if a.audio:
-        r = esegui_da_audio_multitraccia(
-            a.sorgente, cfg, cartella=a.output, esporta_ly=a.lilypond or a.pdf,
-            esporta_tracce_debug=not a.no_tracce_debug, bpm_manuale=a.bpm)
-    else:
-        r = esegui(a.sorgente, cfg, cartella=a.output,
-                   esporta_ly=a.lilypond or a.pdf, incidi_pdf=a.pdf)
+    r = esegui(a.sorgente, cfg, cartella=a.output,
+               esporta_ly=a.lilypond or a.pdf, incidi_pdf=a.pdf)
 
     print(f"Brano: {r.master.titolo}")
     print(f"Anacrusi: {r.master.anacrusi:g} quarti" if r.master.anacrusi
@@ -120,11 +127,6 @@ def main(argv=None) -> int:
         print(f"LilyPond: {r.percorso_ly}")
     if r.percorso_pdf:
         print(f"PDF:      {r.percorso_pdf}")
-    if r.percorso_tracce_debug:
-        print(f"Tracce separate, quantizzate (debug): {r.percorso_tracce_debug}")
-    if r.percorso_tracce_grezze:
-        print(f"Tracce separate, NON quantizzate (debug): "
-              f"{r.percorso_tracce_grezze}")
     if r.report:
         print(f"\nInterventi del validatore ({len(r.report)}):")
         for riga in r.report:

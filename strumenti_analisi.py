@@ -25,7 +25,7 @@ from arranger import analizzatore, ingestione
 
 
 def analizza_cartella(cartella: str) -> int:
-    estensioni = (".xml", ".musicxml", ".mxl", ".mid", ".midi")
+    estensioni = (".xml", ".musicxml", ".mxl")
     files = sorted(f for f in os.listdir(cartella) if f.lower().endswith(estensioni))
     if not files:
         print(f"Nessuno spartito in {cartella}")
