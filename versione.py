@@ -10,16 +10,24 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple
 
-VERSIONE = "0.9.0"
+VERSIONE = "0.9.1"
 DATA = "ottobre 2026"
-PRECEDENTE = "0.8.0"
+PRECEDENTE = "0.9.0"
 
 # Marca temporale del pacchetto: serve a capire a colpo d'occhio QUALE copia
 # del progetto sta girando, quando ne esistono piu' d'una sul disco.
-COMPILATO = "11 ottobre 2026 ore 22.40"
+COMPILATO = "12 ottobre 2026 ore 17.40"
 
 # (titolo della sezione, [voci])
 NOVITA: List[Tuple[str, List[str]]] = [
+    ("Controllo dei file all'avvio", [
+        "All'avvio l'interfaccia verifica che il motore (cartella arranger/) "
+        "sia della sua stessa versione. Aggiornando su GitHub solo app.py, "
+        "l'app partiva comunque e si fermava alla generazione con un errore "
+        "incomprensibile («unexpected keyword argument 'livelli_strumenti'»); "
+        "ora dice subito che i file non sono allineati e quali caricare.",
+    ]),
+
     ("Lead sheet: melodia con le sigle (nuovo)", [
         "Si puo' caricare un LEAD SHEET: la sola melodia su un rigo, con le "
         "sigle degli accordi sopra, come nei canzonieri. Viene riconosciuto "

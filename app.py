@@ -32,6 +32,22 @@ DESTINATARIO = "claudiobianchi82@gmail.com"
 
 st.set_page_config(page_title="Arranger SMIM", page_icon="🎼", layout="wide")
 
+# Versione per cui e' scritta QUESTA interfaccia. Se la cartella arranger/
+# sul server e' di un'altra versione — succede caricando su GitHub solo una
+# parte dei file — l'app non deve partire con un errore incomprensibile a
+# meta' esecuzione (era «Configurazione.__init__() got an unexpected keyword
+# argument 'livelli_strumenti'»), ma dire subito che cosa manca.
+VERSIONE_INTERFACCIA = "0.9.1"
+if VERSIONE != VERSIONE_INTERFACCIA:
+    st.error(
+        f"**File non allineati.** Questa interfaccia (app.py) e' della "
+        f"versione {VERSIONE_INTERFACCIA}, ma il motore (cartella "
+        f"`arranger/`) e' della {VERSIONE}. Succede quando si aggiorna solo "
+        "una parte dei file. Carica sul repository **tutto** il contenuto "
+        "dello zip — in particolare le cartelle `arranger/` ed `esempi/` e "
+        "il file `requirements.txt` — e riavvia l'app.")
+    st.stop()
+
 CARTELLA = os.path.join(tempfile.gettempdir(), "arranger_smim")
 os.makedirs(CARTELLA, exist_ok=True)
 

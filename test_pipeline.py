@@ -1833,6 +1833,13 @@ def test_interfaccia_completa():
         verifica(frammento in testo,
                  f"app.py: manca {descrizione} ({frammento!r})")
 
+    # L'interfaccia dichiara la versione del motore per cui e' scritta, e si
+    # ferma se non coincide: va aggiornata a ogni nuova versione, o l'app
+    # rifiuterebbe di partire anche con i file giusti.
+    from arranger.versione import VERSIONE
+    verifica(f'VERSIONE_INTERFACCIA = "{VERSIONE}"' in testo,
+             f"app.py: VERSIONE_INTERFACCIA non allineata alla {VERSIONE}")
+
     # e cio' che e' stato tolto nella 0.9.0 non deve ricomparire per un
     # incollaggio sbagliato: l'ingresso e' il solo MusicXML
     for residuo in ("esegui_da_audio_multitraccia", "audio_multitraccia",

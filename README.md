@@ -1,6 +1,6 @@
 # Arranger SMIM
 
-**Versione 0.9.0.** Il registro delle modifiche vive in `arranger/versione.py`
+**Versione 0.9.1.** Il registro delle modifiche vive in `arranger/versione.py`
 (`VERSIONE`, `NOVITA`) ed e' mostrato dall'interfaccia in una colonna a destra:
 chi prova una versione nuova deve sapere che cosa e' cambiato senza andarlo a
 cercare. La stessa versione finisce nel tag `<software>` del MusicXML e nel
