@@ -151,15 +151,24 @@ def assegna(parti: List[Parte], analisi: Analisi, cfg: Configurazione,
         # si tiene da parte chi servira' per basso e seconde voci
         riserve = (1 if basso else 0) + (1 if voci else 0)
         n = quanti_solisti(cfg, len(liberi), len(analisi.frasi) or 1, riserve)
+        # Ogni parte viene valutata sul PROPRIO livello: se il violino e' di
+        # terza e il flauto di prima, la melodia deve andare al violino, e non
+        # perche' il violino suoni meglio in astratto ma perche' quelle note,
+        # per lui, sono eseguibili. Valutare tutti sullo stesso livello
+        # nascondeva esattamente la differenza che il professore ha
+        # dichiarato.
         classifica = sorted(
-            liberi, key=lambda p: -idoneita(p, "melodia", melodia, cfg.livello,
+            liberi, key=lambda p: -idoneita(p, "melodia", melodia,
+                                            p.livello or cfg.livello,
                                             tonalita))
         solisti = classifica[:max(1, min(n, len(classifica)))]
         for p in solisti:
-            dentro, _ = copertura(strumento(p.strumento), melodia, cfg.livello)
+            liv = p.livello or cfg.livello
+            dentro, _ = copertura(strumento(p.strumento), melodia, liv)
             resoconto.append(
                 f"[Ruoli] {p.nome}: melodia "
-                f"(idoneita' {idoneita(p, 'melodia', melodia, cfg.livello, tonalita):.2f}, "
+                f"(livello {liv}, "
+                f"idoneita' {idoneita(p, 'melodia', melodia, liv, tonalita):.2f}, "
                 f"{dentro * 100:.0f}% delle note in estensione).")
     for p in solisti:
         p.ruolo = "melodia"
@@ -168,8 +177,10 @@ def assegna(parti: List[Parte], analisi: Analisi, cfg: Configurazione,
     # ------------------------------------------------------------------ basso
     if liberi and basso:
         migliore = max(liberi, key=lambda p: idoneita(p, "basso", basso,
-                                                      cfg.livello, tonalita))
-        if idoneita(migliore, "basso", basso, cfg.livello, tonalita) > 0:
+                                                      p.livello or cfg.livello,
+                                                      tonalita))
+        if idoneita(migliore, "basso", basso,
+                    migliore.livello or cfg.livello, tonalita) > 0:
             migliore.ruolo = "basso"
             liberi.remove(migliore)
             resoconto.append(f"[Ruoli] {migliore.nome}: basso.")
@@ -183,8 +194,10 @@ def assegna(parti: List[Parte], analisi: Analisi, cfg: Configurazione,
         if not pool:
             break
         migliore = max(pool, key=lambda p: idoneita(p, "controcanto", voce,
-                                                    cfg.livello, tonalita))
-        if idoneita(migliore, "controcanto", voce, cfg.livello, tonalita) <= 0.2:
+                                                    p.livello or cfg.livello,
+                                                    tonalita))
+        if idoneita(migliore, "controcanto", voce,
+                    migliore.livello or cfg.livello, tonalita) <= 0.2:
             break
         migliore.ruolo = "controcanto"
         liberi.remove(migliore)
@@ -219,7 +232,7 @@ def solisti_ordinati(parti: List[Parte], analisi: Analisi, cfg: Configurazione,
     solisti = [p for p in parti if p.ruolo == "melodia"]
     return sorted(solisti,
                   key=lambda p: -idoneita(p, "melodia", analisi.melodia,
-                                          cfg.livello, tonalita))
+                                          p.livello or cfg.livello, tonalita))
 
 
 def solista_per_registro(parti: List[Parte], note: List[Nota], liv: str,

@@ -130,13 +130,21 @@ def costruisci_parti(cfg: Configurazione) -> List[Parte]:
             continue
         st = strumento(chiave)
         for i, nome in enumerate(nomi_parti(chiave, n)):
+            id_parte = f"{chiave}{i + 1}"
+            # L'id della parte vince sullo strumento: se il professore ha
+            # detto qualcosa del secondo leggio di violino, quella
+            # indicazione e' piu' specifica di quella data per i violini in
+            # generale, e va rispettata.
+            livello_parte_ = (cfg.livelli_strumenti.get(id_parte)
+                              or cfg.livelli_strumenti.get(chiave))
             parti.append(Parte(
-                id=f"{chiave}{i + 1}", nome=nome,
+                id=id_parte, nome=nome,
                 abbrev=st.abbrev + (f" {i + 1}" if n > 1 else ""),
                 strumento=chiave, chiave=st.chiave_musicale,
                 ottava_chiave=st.ottava_chiave, trasposizione=st.trasposizione,
                 monofonico=st.monofonico, programma_midi=st.programma_midi,
                 righi=st.righi, mostra_sigle=False, variante=i,
+                livello=livello_parte_,
             ))
     return parti
 
@@ -963,42 +971,6 @@ def pattern_percussioni(stile: str, liv: str, misure: List[Misura],
     return ev
 
 
-def pattern_da_batteria_reale(colpi, misure: List[Misura], liv: str) -> List[Evento]:
-    """
-    Riproduce il ritmo trascritto dalla traccia di batteria vera invece di un
-    pattern generico: e' il punto in cui l'importazione da audio da' qualcosa
-    che il motore, partendo da un pianoforte, non potrebbe mai avere.
-
-    `colpi` e' la lista di `ColpoBatteria` prodotta da
-    `audio_multitraccia.trascrivi_batteria`: qui si traduce in eventi, con al
-    massimo un colpo per la durata minima del livello, cosi' un pattern
-    fittissimo non diventi illeggibile in prima media.
-    """
-    if not colpi or not misure:
-        return []
-    minimo = livello(liv).durata_minima
-    fine = misure[-1].fine
-    ordinati = sorted(colpi, key=lambda c: c.inizio)
-    diradati = []
-    ultimo = None
-    for c in ordinati:
-        if ultimo is not None and c.inizio - ultimo < minimo - 1e-6:
-            continue
-        diradati.append(c)
-        ultimo = c.inizio
-
-    ev: List[Evento] = []
-    for i, c in enumerate(diradati):
-        prossimo = diradati[i + 1].inizio if i + 1 < len(diradati) else fine
-        durata = min(minimo, max(0.125, prossimo - c.inizio))
-        ev.append(Evento(inizio=c.inizio, durata=durata,
-                         altezze=[PERC_MIDI[c.strumento]]))
-    return ev
-
-
-
-
-
 def orchestra_tessitura(sp: Spartito, analisi: Analisi, parti: List[Parte],
                         cfg: Configurazione, misure: List[Misura]) -> List[str]:
     """
@@ -1118,6 +1090,43 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                      armonia=list(analisi.armonia))
     part.sottotitolo = (f"Arrangiamento per orchestra scolastica - "
                         f"{cfg.livello} - stile {cfg.stile}")
+    if sp.tipo == "lead_sheet":
+        if sp.sigle:
+            part.report.append(
+                f"[Ingresso] lead sheet riconosciuto: la melodia e' quella "
+                f"scritta, basso e accompagnamento sono costruiti dalle "
+                f"{len(sp.sigle)} sigle del file. Il basso suona la "
+                "fondamentale di ogni accordo (o la nota dopo la barra, nei "
+                "rivolti come C/E).")
+        else:
+            part.report.append(
+                "[Ingresso] lead sheet SENZA SIGLE: l'armonia e' stata "
+                "proposta dall'arrangiatore, un accordo per misura sui gradi "
+                "principali della tonalita'. E' un'armonizzazione plausibile "
+                "della melodia, non necessariamente quella del brano: dalla "
+                "sola melodia non si puo' ricostruire. Per un arrangiamento "
+                "fedele aggiungi le sigle nel file (in Dorico, MuseScore o "
+                "Sibelius) e rigenera.")
+    elif sp.tipo == "solista_e_piano":
+        part.report.append(
+            "[Ingresso] parte solista + pianoforte riconosciuta: la melodia "
+            "e' la parte del solista, l'accompagnamento quello del "
+            "pianoforte.")
+    if cfg.livelli_strumenti:
+        # Va scritto sulla partitura, non solo nel report: chi la prende in
+        # mano fra sei mesi deve sapere che alcune parti sono state calibrate
+        # su un livello diverso, o le leggera' come errori di scrittura.
+        part.sottotitolo += " (livelli differenziati)"
+        part.report.append(
+            "[Livelli] classe impostata su " + cfg.livello + "; indicazioni "
+            "specifiche: "
+            + ", ".join(f"{chiave} = {valore}"
+                        for chiave, valore in sorted(
+                            cfg.livelli_strumenti.items()))
+            + ". Le parti coinvolte sono state calibrate su quel livello per "
+            "estensione, valori ritmici, alterazioni e respiro, e sono state "
+            "valutate su quel livello anche nella scelta di chi porta la "
+            "melodia.")
 
     tessitura = (cfg.modo == "tessitura"
                  or (cfg.modo == "auto" and not analisi.melodia_affidabile))
@@ -1131,15 +1140,17 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
         return part
 
     for p in parti:
+        # Il livello di QUESTA parte: in una classe eterogenea ogni
+        # strumento puo' avere il suo, e tutto il materiale che segue —
+        # melodia, basso, accompagnamento, figurazioni — va scritto sul
+        # livello di chi lo suonera', non su una media della classe.
+        liv_p = p.livello or cfg.livello
         st = strumento(p.strumento)
         ev: List[Evento] = []
 
         # ---------------------------------------------------- percussioni
         if st.percussione:
-            colpi_reali = getattr(sp, "colpi_batteria", None)
-            ev = (pattern_da_batteria_reale(colpi_reali, misure, cfg.livello)
-                  if colpi_reali else
-                  pattern_percussioni(cfg.stile, cfg.livello, misure, analisi.groove))
+            ev = pattern_percussioni(cfg.stile, liv_p, misure, analisi.groove)
             p.eventi = _riempi_pause(ev, inizio, fine)
             applica_dinamiche(p, sp.dinamiche, sp.gradazioni)
             continue
@@ -1154,14 +1165,14 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
         for blocco in _blocchi_contigui(porta_melodia):
             a = frasi[blocco[0]][0] if blocco[0] < len(frasi) else inizio
             b = frasi[blocco[-1]][1] if blocco[-1] < len(frasi) else fine
-            ev_melodia.extend(linea_melodia(analisi.melodia, st, cfg.livello, (a, b)))
+            ev_melodia.extend(linea_melodia(analisi.melodia, st, liv_p, (a, b)))
 
         # glockenspiel raddoppia la melodia nei climax (cinematico)
         if cfg.stile == "Cinematico" and p.strumento in ("glockenspiel", "metallofono"):
             for i in climax:
                 if i < len(frasi) and i not in porta_melodia:
                     ev_melodia.extend(
-                        linea_melodia(analisi.melodia, st, cfg.livello, frasi[i]))
+                        linea_melodia(analisi.melodia, st, liv_p, frasi[i]))
 
         ev.extend(ev_melodia)
         coperto = _copertura(ev)
@@ -1185,12 +1196,12 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
 
             if p.ruolo == "basso" or (p.strumento == "violoncello" and p.ruolo != "melodia"):
                 if cfg.stile == "Jazz":
-                    ev.extend(walking_bass(sotto, st, cfg.livello, mis_sub))
+                    ev.extend(walking_bass(sotto, st, liv_p, mis_sub))
                 elif cfg.stile == "Cinematico":
-                    ev.extend(archi_cinematici(sotto, st, cfg.livello, mis_sub,
+                    ev.extend(archi_cinematici(sotto, st, liv_p, mis_sub,
                                                pizzicato=True))
                 else:
-                    ev.extend(linea_basso(sotto, st, cfg.livello))
+                    ev.extend(linea_basso(sotto, st, liv_p))
 
             elif p.strumento == "chitarra":
                 # La chitarra si tratta come strumento MELODICO: sopra il rigo
@@ -1206,13 +1217,13 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                     ritmo_figurazione(analisi.figurazione, a, b), mis_sub,
                     per_movimento=3 if composto else 2)
                 if usa_figurazione and ritmo_ch:
-                    ev.extend(accordi_su_ritmo(sotto, st, cfg.livello, ritmo_ch,
+                    ev.extend(accordi_su_ritmo(sotto, st, liv_p, ritmo_ch,
                                                arpeggia=True))
                 else:
-                    passo_arp = 1.0 if cfg.livello == "1a Media" else 0.5
+                    passo_arp = 1.0 if liv_p == "1a Media" else 0.5
                     if mis_sub and mis_sub[0].composto:
-                        passo_arp = 1.5 if cfg.livello == "1a Media" else 0.5
-                    ev.extend(arpeggio(sotto, st, cfg.livello, passo=passo_arp))
+                        passo_arp = 1.5 if liv_p == "1a Media" else 0.5
+                    ev.extend(arpeggio(sotto, st, liv_p, passo=passo_arp))
 
             elif p.strumento == "pianoforte":
                 ritmo = ritmo_figurazione(analisi.figurazione, a, b)
@@ -1224,22 +1235,22 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                     destra = riproduci_figurazione(
                         [n for n in analisi.figurazione
                          if n.rigo == 1 and a - 1e-6 <= n.inizio < b - 1e-6],
-                        st, cfg.livello, mis_sub, max_note=3, rigo=1,
+                        st, liv_p, mis_sub, max_note=3, rigo=1,
                         mantieni_ottave=True)
                     # se nell'originale la destra fa solo melodia, qui tace:
                     # inventarle accordi produce solo collisioni con la sinistra
                 elif cfg.stile == "Cinematico":
-                    destra = arpeggio(sotto, st, cfg.livello, passo=0.5,
+                    destra = arpeggio(sotto, st, liv_p, passo=0.5,
                                       ampio=(p.variante % 2 == 0))
                 elif usa_figurazione and ritmo:
                     destra = accordi_su_ritmo(
-                        sotto, st, cfg.livello,
+                        sotto, st, liv_p,
                         dirada_ritmo(ritmo, mis_sub, per_movimento=2),
                         arpeggia=(p.variante % 2 == 1))
                 elif p.variante % 2 == 1:
-                    destra = arpeggio(sotto, st, cfg.livello, passo=0.5, ampio=False)
+                    destra = arpeggio(sotto, st, liv_p, passo=0.5, ampio=False)
                 else:
-                    destra = accordi_a_blocchi(sotto, st, cfg.livello,
+                    destra = accordi_a_blocchi(sotto, st, liv_p,
                                                analisi.groove, mis_sub,
                                                senza_primo_movimento=True)
                 for e in destra:
@@ -1249,17 +1260,17 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
             elif p.ruolo == "controcanto" and p.id in voci_assegnate:
                 # seconda voce / contrappunto gia' scritti nell'originale:
                 # si riprendono tali e quali, solo trasposti d'ottava
-                voce = linea_melodia(voci_assegnate[p.id], st, cfg.livello, (a, b))
+                voce = linea_melodia(voci_assegnate[p.id], st, liv_p, (a, b))
                 ev_originali.extend(voce)
                 ev.extend(voce)
 
             elif p.ruolo == "controcanto":
                 if cfg.stile == "Cinematico" and st.famiglia in ("fiati", "ottoni"):
-                    ev.extend(pad_fiati(sotto, st, cfg.livello, mis_sub, grado=1))
+                    ev.extend(pad_fiati(sotto, st, liv_p, mis_sub, grado=1))
                 elif cfg.stile == "Cinematico" and st.famiglia == "archi":
-                    ev.extend(archi_cinematici(sotto, st, cfg.livello, mis_sub))
+                    ev.extend(archi_cinematici(sotto, st, liv_p, mis_sub))
                 else:
-                    ev.extend(linea_controcanto(sotto, st, cfg.livello, cfg.stile))
+                    ev.extend(linea_controcanto(sotto, st, liv_p, cfg.stile))
 
             else:  # armonia
                 if st.monofonico:
@@ -1270,12 +1281,12 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                     riferimento = (max(precedenti, key=lambda e: e.fine).altezze[0]
                                    if precedenti else None)
                     dalla_musica = linea_dalla_figurazione(analisi, st,
-                                                           cfg.livello, a, b,
+                                                           liv_p, a, b,
                                                            mis_sub, riferimento)
                     ev.extend(dalla_musica or
-                              pad_fiati(sotto, st, cfg.livello, mis_sub, grado=2))
+                              pad_fiati(sotto, st, liv_p, mis_sub, grado=2))
                 else:
-                    ev.extend(accordi_a_blocchi(sotto, st, cfg.livello, analisi.groove, mis_sub))
+                    ev.extend(accordi_a_blocchi(sotto, st, liv_p, analisi.groove, mis_sub))
 
         if p.strumento == "pianoforte":
             # la sinistra copre sempre tutto il brano, anche dove la destra
@@ -1286,18 +1297,18 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
             # pianoforte con i soli accordi interni
             sinistra_originale = [n for n in sp.note if n.rigo == 2]
             if cfg.stile == "Jazz":
-                sinistra = walking_bass(tutto, st, cfg.livello, misure)
+                sinistra = walking_bass(tutto, st, liv_p, misure)
             elif usa_figurazione and p.variante % 2 == 0 and sinistra_originale:
                 # la mano sinistra dell'originale e' gia' la parte giusta:
                 # arpeggi e figure ritmiche vanno conservati, non appiattiti
                 sinistra = riproduci_figurazione(sinistra_originale, st,
-                                                 cfg.livello, misure,
+                                                 liv_p, misure,
                                                  max_note=3, rigo=2,
                                                  mantieni_ottave=True)
             elif p.variante % 2 == 1:
-                sinistra = basso_sostenuto(tutto, st, cfg.livello, misure)
+                sinistra = basso_sostenuto(tutto, st, liv_p, misure)
             else:
-                sinistra = linea_basso(tutto, st, cfg.livello)
+                sinistra = linea_basso(tutto, st, liv_p)
             for e in sinistra:
                 e.rigo = 2
                 if not e.letterale:
@@ -1312,7 +1323,7 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
             [e for e in ev if id(e) not in id_melodia], misure)
         # raccorda le giunzioni fra melodia e accompagnamento dentro la stessa
         # parte: si muove solo l'accompagnamento, la melodia resta intatta
-        lo_p, hi_p = st.ambito(cfg.livello)
+        lo_p, hi_p = st.ambito(liv_p)
         ordinati = sorted(ev, key=lambda e: (e.rigo, e.inizio))
         for _ in range(3):        # poche passate: la correzione si propaga
             _leviga_selettiva(ordinati, lo_p, hi_p, id_melodia)

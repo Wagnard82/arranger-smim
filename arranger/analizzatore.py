@@ -538,6 +538,97 @@ def armonia_dalle_sigle(sp: Spartito) -> List[Accordo]:
     return completi
 
 
+# Gradi fra cui sceglie l'armonizzazione di una melodia nuda, con la loro
+# preferenza a priori: I, V e IV reggono quasi tutto il repertorio scolastico,
+# gli accordi minori servono a non forzare le melodie che li chiedono.
+GRADI_ARMONIZZAZIONE = (
+    (0, "maj", 0.30), (7, "maj", 0.25), (5, "maj", 0.20), (7, "dom7", 0.15),
+    (9, "min", 0.10), (2, "min", 0.08), (4, "min", 0.00),
+)
+
+
+def armonizza_melodia(sp: Spartito, melodia: List[Nota],
+                      penale_cambio: float = 0.35) -> List[Accordo]:
+    """
+    Propone un'armonia per una melodia che non ne ha: un lead sheet senza
+    sigle, cioe' una linea sola.
+
+    PERCHE' NON `rileva_armonia`. Quella e' pensata per accordi SCRITTI, e
+    tratta ogni nota presente come nota dell'accordo. Su una linea sola ogni
+    nota diventa la sua triade: sull'Inno alla gioia dava Mim-Fa-Sol-Fa-Mim-
+    Rem con quaranta cambi d'accordo in sedici battute, e azzeccava la
+    fondamentale delle sigle vere solo nel 30% dei movimenti.
+
+    Qui si ragiona come un arrangiatore che armonizza a orecchio: un accordo
+    per misura, scelto fra i gradi principali della tonalita' dell'armatura;
+    vince quello che contiene piu' note della melodia, pesate per durata e
+    con piu' peso a quelle sul battere; una preferenza a priori per I, V e
+    IV; e una penalita' per ogni cambio, risolta su tutto il brano insieme
+    (Viterbi), perche' il ritmo armonico regga. La tonica sull'ultimo accordo
+    si favorisce solo se la melodia chiude davvero sulla tonica: una frase
+    che si ferma sul quinto grado chiede una semicadenza, non una cadenza.
+
+    QUANTO CI SI PUO' FIDARE, misurato. Sull'Inno alla gioia la fondamentale
+    giusta nell'84% dei movimenti. Su una melodia breve di due note per
+    misura (Do-Re | Do-La | Fa-Sol | Sol, armonizzata dall'autore Do-Lam-Fa-
+    Sol) solo il 25%: proponeva Fa-Fa-Sol7-Sol, che e' un'armonizzazione
+    corretta della stessa melodia, ma non quella del brano. Dalla sola
+    melodia non si ricostruisce l'armonia DEL BRANO: se ne propone UNA,
+    plausibile. Per un arrangiamento fedele servono le sigle, ed e' per
+    questo che il report lo dichiara.
+    """
+    if not sp.misure or not melodia:
+        return []
+    tonica = (sp.misure[0].tonalita * 7) % 12
+    candidati = [((tonica + s) % 12, q, priore)
+                 for s, q, priore in GRADI_ARMONIZZAZIONE]
+    classi = [set(Accordo(inizio=0, durata=1, fondamentale=r,
+                          qualita=q).note_accordo())
+              for r, q, _p in candidati]
+
+    punteggi: List[List[float]] = []
+    for m in sp.misure:
+        a, b = m.inizio, m.fine
+        dentro = [n for n in melodia if n.inizio < b - 1e-6 and n.fine > a + 1e-6]
+        riga = []
+        for (r, q, priore), note_acc in zip(candidati, classi):
+            s = priore
+            for n in dentro:
+                durata = min(n.fine, b) - max(n.inizio, a)
+                peso = durata * (1.5 if abs(n.inizio - a) < 1e-6 else 1.0)
+                s += peso * (1.0 if n.midi % 12 in note_acc else -0.6)
+            riga.append(s)
+        punteggi.append(riga)
+
+    k = len(candidati)
+    migliori = [punteggi[0][:]]
+    provenienza: List[List[int]] = [[0] * k]
+    for i in range(1, len(punteggi)):
+        riga, da = [], []
+        for c in range(k):
+            valore, j = max((migliori[-1][p] - (penale_cambio if p != c else 0.0), p)
+                            for p in range(k))
+            riga.append(valore + punteggi[i][c])
+            da.append(j)
+        migliori.append(riga)
+        provenienza.append(da)
+
+    ultima = migliori[-1][:]
+    if max(melodia, key=lambda n: n.fine).midi % 12 == tonica:
+        ultima[0] += 1.0
+    c = max(range(k), key=lambda x: ultima[x])
+    scelte = [c]
+    for i in range(len(punteggi) - 1, 0, -1):
+        c = provenienza[i][c]
+        scelte.append(c)
+    scelte.reverse()
+
+    return [Accordo(inizio=m.inizio, durata=m.durata,
+                    fondamentale=candidati[c][0], qualita=candidati[c][1],
+                    confidenza=0.5)
+            for m, c in zip(sp.misure, scelte)]
+
+
 def rileva_armonia(sp: Spartito, per_movimento: bool = True) -> List[Accordo]:
     """
     Griglia armonica dedotta dal materiale realmente scritto nello spartito.
@@ -648,6 +739,10 @@ def rileva_basso(sp: Spartito, armonia: List[Accordo]) -> List[Nota]:
     attaccano sopra un basso ancora in corso non lo interrompono. Se non c'e'
     materiale sufficiente si torna alla griglia armonica.
     """
+    if sp.tipo == "lead_sheet":
+        # nel file non c'e' nessun basso da seguire: cercarlo fra le note
+        # vorrebbe dire prenderlo dalla melodia
+        return basso_dalle_sigle(sp, armonia)
     gravi = [n for n in sp.note if n.rigo == 2] or sp.note
     linea = _linea_di_basso(gravi, pavimenti=_pavimenti(sp, gravi))
 
@@ -683,6 +778,57 @@ def rileva_basso(sp: Spartito, armonia: List[Accordo]) -> List[Nota]:
             midi = min(candidate, key=lambda c: abs(c - n.midi))
         fuori.append(Nota(midi=midi, inizio=n.inizio, durata=n.durata, rigo=2))
     return fuori
+
+
+# Registro in cui collocare un basso costruito dalle sigle: da Mi2 a Mi3,
+# l'ottava centrale di violoncello, fagotto e sinistra del pianoforte. Gli
+# strumenti lo trasportano poi nella loro estensione; qui conta solo che la
+# linea stia DENTRO un'ottava e si muova per passi brevi.
+BASSO_SIGLE_MIN = 40
+BASSO_SIGLE_MAX = 52
+
+
+def basso_dalle_sigle(sp: Spartito, armonia: List[Accordo]) -> List[Nota]:
+    """
+    Linea di basso costruita dalle sigle, per lo spartito che un basso non
+    ce l'ha: il lead sheet.
+
+    Una nota per accordo, che dura quanto l'accordo. Si suona la
+    FONDAMENTALE, oppure il basso indicato dalla sigla quando c'e' una barra
+    (C/E -> Mi): chi scrive un rivolto lo vuole sentire, e' spesso una linea
+    di basso per grado congiunto pensata apposta.
+
+    L'ottava non e' fissa: fra le altezze possibili dentro il registro si
+    sceglie quella piu' vicina alla nota precedente. Cosi' un giro Do-Sol-Do
+    resta Do2-Sol2-Do2 (o Do2-Sol1 a seconda del registro) invece di saltare
+    di sesta a ogni cambio, ed e' una linea che un ragazzo di prima media
+    legge senza fatica.
+
+    E' deliberatamente semplice. Il basso vero — ritmato, con le note di
+    passaggio, in stile — lo scrive l'orchestratore partendo da questa
+    griglia, esattamente come fa con il basso ricavato da una riduzione
+    pianistica: qui serve solo a dirgli quale nota sta sotto quale accordo,
+    nel registro giusto.
+    """
+    linea: List[Nota] = []
+    precedente: Optional[int] = None
+    for acc in armonia:
+        if acc.durata <= 1e-6:
+            continue
+        classe = acc.basso if acc.basso is not None else acc.fondamentale
+        candidati = [m for m in range(BASSO_SIGLE_MIN, BASSO_SIGLE_MAX + 1)
+                     if m % 12 == classe % 12]
+        riferimento = precedente if precedente is not None else \
+            (BASSO_SIGLE_MIN + BASSO_SIGLE_MAX) // 2
+        midi = min(candidati, key=lambda m: (abs(m - riferimento), m))
+        # Un accordo che prosegue oltre la stanghetta arriva qui gia' spezzato
+        # per misura (`armonia_dalle_sigle` non scavalca le stanghette), quindi
+        # la nota si ribatte a ogni battere: sulla pagina e' piu' leggibile di
+        # una legatura di valore, e da' al basso il suo appoggio.
+        linea.append(Nota(midi=midi, inizio=acc.inizio, durata=acc.durata,
+                          rigo=2, voce=1))
+        precedente = midi
+    return linea
 
 
 def _pavimenti(sp: Spartito, note: List[Nota]) -> Dict[float, int]:
@@ -753,6 +899,21 @@ def _linea_di_basso(note: List[Nota], pavimenti: Optional[Dict[float, int]] = No
 
 def rileva_groove(sp: Spartito) -> Tuple[List[float], float]:
     """Pattern d'attacco dominante entro la misura + suddivisione prevalente."""
+    if sp.tipo == "lead_sheet" and sp.misure:
+        # Il groove serve a dare il ritmo all'accompagnamento. In una
+        # riduzione pianistica lo si ricava dall'accompagnamento scritto; in
+        # un lead sheet l'unico ritmo nel file e' quello della MELODIA, e
+        # copiarlo sull'accompagnamento lo farebbe andare in unisono ritmico
+        # col canto, sincopi comprese. Si usano invece i movimenti del metro:
+        # un accompagnamento neutro, che la scelta di stile poi colora.
+        m = max(sp.misure, key=lambda x: x.durata)
+        passo = m.unita_movimento
+        battiti = []
+        t = 0.0
+        while t < m.durata_piena - 1e-6:
+            battiti.append(round(t, 6))
+            t += passo
+        return battiti, (0.5 if m.composto else 1.0)
     conta: Dict[float, int] = {}
     for n in sp.note:
         m = sp.misura_a(n.inizio)
@@ -1267,6 +1428,8 @@ def rileva_figurazione(sp: Spartito, melodia: List[Nota]) -> List[Nota]:
     riconosciuta la melodia, il resto e' accompagnamento e va sfruttato, non
     ridotto a una griglia di accordi.
     """
+    if sp.tipo == "lead_sheet":
+        return []        # non c'e' accompagnamento scritto da imitare
     if sp.tipo == "solista_e_piano" and sp.parte_solista is not None:
         # tutto quello che non canta il solista e' accompagnamento, punto
         return [n for n in sp.note if n.origine != sp.parte_solista]
@@ -1461,7 +1624,8 @@ def melodia_dello_spartito(sp: Spartito) -> List[Nota]:
     pianoforte, cercare la melodia e' non solo inutile ma dannoso: la melodia
     e' quella parte, per intero, e ogni euristica non puo' che peggiorarla.
     """
-    if sp.tipo == "solista_e_piano" and sp.parte_solista is not None:
+    if sp.tipo in ("solista_e_piano", "lead_sheet") \
+            and sp.parte_solista is not None:
         return linea_del_solista(sp)
     return rileva_melodia(sp)
 
@@ -1485,8 +1649,11 @@ def linea_del_solista(sp: Spartito) -> List[Nota]:
 def analizza_con_melodia(sp: Spartito, melodia: List[Nota]) -> Analisi:
     """Come `analizza`, ma con una melodia gia' decisa (per esempio dall'IA)."""
     # se lo spartito porta gia' le sigle, quelle comandano
-    armonia = armonia_dalle_sigle(sp) or rileva_armonia(sp)
-    if sp.tipo != "solista_e_piano":
+    armonia = armonia_dalle_sigle(sp)
+    if not armonia:
+        armonia = (armonizza_melodia(sp, melodia) if sp.tipo == "lead_sheet"
+                   else rileva_armonia(sp))
+    if sp.tipo not in ("solista_e_piano", "lead_sheet"):
         melodia = completa_mano(sp, scarta_figurazione(sp, melodia, armonia))
     basso = rileva_basso(sp, armonia)
     figurazione = rileva_figurazione(sp, melodia)

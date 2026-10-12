@@ -177,6 +177,32 @@ def livello(nome: str) -> Livello:
     return LIVELLI.get(nome, LIVELLI["3a Media"])
 
 
+def livello_parte(livello_parte_: Optional[str],
+                  livello_partitura: str) -> Livello:
+    """
+    Il livello da applicare a una parte: il suo, se ce l'ha, altrimenti
+    quello della partitura.
+
+    Esiste perche' le classi eterogenee sono la norma nella scuola media.
+    Un livello unico per tutta l'orchestra obbliga a scegliere fra annoiare
+    chi suona da tre anni e travolgere chi ha cominciato a ottobre; potendo
+    indicarlo strumento per strumento, la stessa partitura sta insieme
+    davvero.
+
+    Il valore None della parte significa «come la partitura», e non e' la
+    stessa cosa di «1a Media»: serve a distinguere una parte per cui il
+    professore non ha detto niente da una che ha messo espressamente al
+    livello piu' basso.
+    """
+    return livello(livello_parte_ or livello_partitura)
+
+
+def nome_livello_parte(livello_parte_: Optional[str],
+                       livello_partitura: str) -> str:
+    """Come sopra ma restituisce il nome, per `Strumento.ambito`."""
+    return livello_parte_ or livello_partitura
+
+
 def strumento(chiave: str) -> Strumento:
     return REGISTRO[chiave]
 

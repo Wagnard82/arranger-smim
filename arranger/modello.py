@@ -2,7 +2,7 @@
 Modello dati interno di Arranger SMIM.
 
 Tutto il sistema lavora su questa rappresentazione neutra (nessuna dipendenza
-esterna). MusicXML / MIDI / audio entrano da `ingestion`, escono da `esportatore`.
+esterna). Il MusicXML entra da `ingestione`, la partitura esce da `esportatore`.
 
 Convenzioni:
   - le durate e gli offset sono espressi in QUARTI (float), non in tick;
@@ -104,10 +104,13 @@ class Spartito:
     bpm: float = 90.0
     anacrusi: float = 0.0  # durata in quarti della battuta di levare (0 = nessuna)
     tipo: str = "pianistico"
-    # "pianistico" | "solista_e_piano" | "audio_multitraccia"
+    # "pianistico"      riduzione per pianoforte: melodia e accompagnamento
+    #                   vanno riconosciuti dentro le stesse note;
+    # "solista_e_piano" parte solista + pianoforte: la melodia e' scritta;
+    # "lead_sheet"      melodia sola con le sigle: la melodia e' scritta, e
+    #                   basso e accompagnamento NASCONO dalle sigle, perche'
+    #                   nel file non ci sono.
     parte_solista: Optional[int] = None   # indice della parte che canta
-    colpi_batteria: list = field(default_factory=list)
-    # ColpoBatteria dalla separazione audio, se lo spartito viene da li'
     dinamiche: List[Tuple[float, str]] = field(default_factory=list)
     # [(offset in quarti, "p"/"mf"/"ff"/...)] lette dallo spartito originale
     sigle: List[Tuple[float, int, str, Optional[int]]] = field(default_factory=list)
@@ -258,6 +261,13 @@ class Parte:
     # limiti per rigo: la destra non scende in cantina, la sinistra non sale
     variante: int = 0             # indice del diviso: differenzia le scritture
                                   # fra Pianoforte 1 e 2, Chitarra 1 e 2, ecc.
+    livello: Optional[str] = None
+    # Livello didattico di QUESTA parte. None = si usa quello della
+    # partitura. Serve alle classi eterogenee, che sono la norma piu' che
+    # l'eccezione: in un'orchestra di scuola media capita di avere un
+    # violino al terzo anno di strumento accanto a un flauto che ha
+    # cominciato a ottobre, e un livello unico costringe a scegliere fra
+    # annoiare l'uno e travolgere l'altro.
 
     def ordina(self) -> None:
         self.eventi.sort(key=lambda e: (e.inizio, -max(e.altezze) if e.altezze else 0))
@@ -295,6 +305,21 @@ class Partitura:
 class Configurazione:
     formazione: Dict[str, int] = field(default_factory=dict)  # {"flauto": 2, "violino": 2, ...}
     livello: str = "1a Media"
+    livelli_strumenti: Dict[str, str] = field(default_factory=dict)
+    # Livello per singolo strumento, es. {"violino": "3a Media",
+    # "flauto": "1a Media"}. Quello che non compare qui segue `livello`.
+    #
+    # Serve alle classi eterogenee, che nella scuola media sono la norma
+    # piu' che l'eccezione: capita di avere un violino al terzo anno di
+    # strumento accanto a un flauto che ha cominciato a ottobre. Con un
+    # livello unico si e' costretti a scegliere fra annoiare l'uno e
+    # travolgere l'altro; potendo indicarlo strumento per strumento, la
+    # stessa partitura sta insieme davvero.
+    #
+    # La chiave puo' essere lo strumento ("violino": vale per tutti i
+    # violini) oppure l'id della parte ("violino2": vale solo per il
+    # secondo leggio), perche' dentro la stessa sezione i leggii sono
+    # spesso di livello diverso.
     stile: str = "Normale"           # Normale | Cinematico | Jazz | Automatico
     tonalita_originale: bool = True
     trasporto: int = 0                 # semitoni di trasporto globale

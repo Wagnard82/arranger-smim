@@ -20,7 +20,8 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 from .modello import Evento, Misura, Parte, Partitura
-from .strumenti import Livello, Strumento, livello, strumento
+from .strumenti import (Livello, Strumento, livello, livello_parte,
+                        nome_livello_parte, strumento)
 
 MAGGIORE = [0, 2, 4, 5, 7, 9, 11]
 RESPIRO = 1.0     # una pausa di almeno un quarto separa due tratti di frase
@@ -152,7 +153,7 @@ def filtro_estensione(part: Partitura) -> None:
         st = strumento(p.strumento)
         if st.percussione:
             continue
-        lo, hi = st.ambito(part.livello)
+        lo, hi = st.ambito(nome_livello_parte(p.livello, part.livello))
         for rigo in sorted({e.rigo for e in p.eventi}):
             flusso = [e for e in p.eventi if e.rigo == rigo]
             for tratto in tratti(flusso):
@@ -206,10 +207,13 @@ def filtro_ritmico(part: Partitura) -> None:
     Non fonde MAI oltre la stanghetta: il metro del brano resta intatto a
     qualunque livello didattico.
     """
-    L = livello(part.livello)
-    if L.durata_minima <= 0.25:
-        return
+    # Il livello si legge PER PARTE, non una volta per tutta la partitura:
+    # in una classe eterogenea il flauto che ha cominciato a ottobre e il
+    # violino al terzo anno non possono avere la stessa soglia.
     for p in part.parti:
+        L = livello_parte(p.livello, part.livello)
+        if L.durata_minima <= 0.25:
+            continue
         if p.ruolo == "melodia":
             continue          # la melodia conserva il ritmo dell'originale
         if strumento(p.strumento).percussione and part.stile == "Jazz":
@@ -250,12 +254,12 @@ def filtro_salti(part: Partitura) -> None:
     salto all'andata e uno al ritorno, cioe' proprio la frammentazione che si
     vuole evitare. La melodia non viene mai toccata.
     """
-    L = livello(part.livello)
     for p in part.parti:
+        L = livello_parte(p.livello, part.livello)
         if p.ruolo == "melodia" or strumento(p.strumento).percussione:
             continue
         st = strumento(p.strumento)
-        lo, hi = st.ambito(part.livello)
+        lo, hi = st.ambito(nome_livello_parte(p.livello, part.livello))
         for rigo in sorted({e.rigo for e in p.eventi}):
             flusso = [e for e in p.eventi if e.rigo == rigo]
             for tratto in tratti(flusso):
@@ -310,11 +314,11 @@ def filtro_alterazioni(part: Partitura) -> None:
     modulazioni) va lasciata: ricondurla alla scala produrrebbe una nota
     sbagliata, che e' molto peggio di una nota difficile.
     """
-    L = livello(part.livello)
-    if L.alterazioni:
-        return
     scala = _scala(part.misure)
     for p in part.parti:
+        L = livello_parte(p.livello, part.livello)
+        if L.alterazioni:
+            continue
         if strumento(p.strumento).percussione:
             continue
         for e in p.eventi:
@@ -340,7 +344,9 @@ def filtro_alterazioni(part: Partitura) -> None:
             if cambiato:
                 part.report.append(
                     f"[Alterazioni] {p.nome}, mis. {_misura_di(part.misure, e.inizio)}: "
-                    f"nota alterata non prevista in {part.livello} -> ricondotta alla tonalita'.")
+                    f"nota alterata non prevista in "
+                    f"{nome_livello_parte(p.livello, part.livello)} -> "
+                    "ricondotta alla tonalita'.")
             e.altezze = sorted(set(nuove))
 
 
@@ -383,8 +389,8 @@ def diteggiatura_chitarra(altezze: List[int], capotasto_max: int = 5,
 
 
 def filtro_idiomatico(part: Partitura) -> None:
-    L = livello(part.livello)
     for p in part.parti:
+        L = livello_parte(p.livello, part.livello)
         st = strumento(p.strumento)
 
         # ---- chitarra: diteggiature
@@ -406,7 +412,7 @@ def filtro_idiomatico(part: Partitura) -> None:
 
         # ---- archi: prima posizione e cambi di corda
         if st.famiglia == "archi" and not L.cambi_posizione and p.ruolo != "melodia":
-            lo, hi = st.ambito(part.livello)
+            lo, hi = st.ambito(nome_livello_parte(p.livello, part.livello))
             for rigo in sorted({e.rigo for e in p.eventi}):
                 flusso = [e for e in p.eventi if e.rigo == rigo]
                 for tratto in tratti(flusso):
@@ -456,7 +462,7 @@ def filtro_incroci(part: Partitura) -> None:
         if p.righi != 2:
             continue
         st = strumento(p.strumento)
-        lo, hi = st.ambito(part.livello)
+        lo, hi = st.ambito(nome_livello_parte(p.livello, part.livello))
         sinistra = [e for e in p.eventi if e.rigo == 2 and not e.pausa]
         for e in (x for x in p.eventi if x.rigo == 1 and not x.pausa):
             if e.letterale:
@@ -553,7 +559,6 @@ def filtro_divisi(part: Partitura) -> None:
     della prima, in prova non regge. Quindi: niente note sopra il compagno di
     sezione che li precede, e valori ritmici piu' larghi.
     """
-    L = livello(part.livello)
     gruppi: Dict[str, List[Parte]] = {}
     for p in part.parti:
         gruppi.setdefault(p.strumento, []).append(p)
@@ -564,15 +569,21 @@ def filtro_divisi(part: Partitura) -> None:
         st = strumento(chiave)
         if st.percussione:
             continue
-        lo, hi = st.ambito(part.livello)
         parti.sort(key=lambda p: p.variante)
 
         for indice in range(1, len(parti)):
             sotto = parti[indice]
             sopra = parti[indice - 1]
+            # Il livello e' quello della parte SOTTO, cioe' del leggio meno
+            # avanti: e' lui che deve poter eseguire. Se il professore gli ha
+            # assegnato un livello proprio e' quello che conta, non quello
+            # della sezione ne' quello del primo leggio.
+            L_sotto = livello_parte(sotto.livello, part.livello)
+            lo, hi = st.ambito(nome_livello_parte(sotto.livello,
+                                                  part.livello))
             _sotto_il_compagno(part, sotto, sopra, lo, hi)
             if sotto.ruolo != "melodia":
-                _semplifica_ritmo(part, sotto, L.durata_minima * 2)
+                _semplifica_ritmo(part, sotto, L_sotto.durata_minima * 2)
 
 
 def _sotto_il_compagno(part: Partitura, sotto: Parte, sopra: Parte,
@@ -645,15 +656,17 @@ def filtro_respiro(part: Partitura) -> None:
     prima media che trova una legatura di otto battute non la esegue: si ferma
     dove capita, e la sezione va fuori insieme.
     """
-    L = livello(part.livello)
-    limite = L.fiato_max
-    if limite <= 0:
-        return
     respiro = 0.5
 
     for p in part.parti:
         st = strumento(p.strumento)
         if st.famiglia not in ("fiati", "ottoni"):
+            continue
+        # Il fiato si misura sul singolo esecutore: e' la piu' personale
+        # delle capacita', e in una classe eterogenea due flauti possono
+        # averla molto diversa.
+        limite = livello_parte(p.livello, part.livello).fiato_max
+        if limite <= 0:
             continue
         nuovi: List[Evento] = []
         suonato = 0.0

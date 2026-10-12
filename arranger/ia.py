@@ -144,7 +144,13 @@ def _sintesi_analisi(analisi: Analisi, cfg: Configurazione, titolo: str) -> str:
     return (f"Brano: {titolo}\n"
             f"Organico: {cfg.formazione}\n"
             f"Livello: {cfg.livello} | Stile: {cfg.stile}\n"
-            f"Frasi: {frasi}\n"
+            + ("Livelli differenziati per strumento: "
+               + ", ".join(f"{k}={v}" for k, v in
+                           sorted(cfg.livelli_strumenti.items()))
+               + ". Tienine conto: non tutti possono eseguire le stesse "
+                 "cose.\n"
+               if cfg.livelli_strumenti else "")
+            + f"Frasi: {frasi}\n"
             f"Ambito melodia (MIDI): {estremi[0]}-{estremi[1]}\n"
             f"Griglia armonica: {griglia}")
 

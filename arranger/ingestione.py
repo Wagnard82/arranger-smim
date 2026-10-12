@@ -1,26 +1,31 @@
 """
-MODULO 1 - Acquisizione e pre-processing.
+MODULO 1 - Acquisizione.
 
-Uniforma qualsiasi input in uno `Spartito` pianistico (il "master").
+Legge un MusicXML (.xml / .musicxml / .mxl) e lo porta nello `Spartito`
+interno (il "master"). Tre forme di spartito vengono riconosciute dalla loro
+STRUTTURA, non dal nome delle parti:
 
-  Ramo A: .xml / .musicxml / .mxl        -> parser MusicXML nativo (stdlib)
-  Ramo A': .mid / .midi                  -> parser SMF nativo (stdlib)
-  Ramo B: .mp3 / .wav / link YouTube     -> yt-dlp + basic-pitch (import pigro)
+  * riduzione pianistica          -> melodia e accompagnamento sono dentro le
+                                     stesse note, e l'analisi li separa;
+  * parte solista + pianoforte    -> la melodia e' la parte del solista;
+  * lead sheet                    -> una melodia sola con le sigle degli
+                                     accordi: basso e accompagnamento nascono
+                                     dalle sigle.
 
-Il parser MusicXML e' scritto su xml.etree per non dipendere da music21:
-il motore resta cosi' testabile e installabile ovunque. Se music21 e'
-presente puo' essere usato come fallback per file esotici.
+L'ingresso e' volutamente il solo MusicXML. Audio, MIDI e PDF sono stati
+tolti nella 0.9.0: la trascrizione da audio non arrivava a una qualita'
+utilizzabile, e MIDI e PDF portavano con se' errori (quantizzazione,
+riconoscimento ottico) che e' meglio correggere in un editor di notazione,
+dove si vedono, prima di arrangiare. Dorico, MuseScore e Sibelius esportano
+tutti in MusicXML.
+
+Il parser e' scritto su xml.etree per non dipendere da music21: il motore
+resta cosi' testabile e installabile ovunque.
 """
 
 from __future__ import annotations
 
-import glob
-import io
 import os
-import re
-import shutil
-import struct
-import sys
 import zipfile
 from typing import Dict, List, Optional, Tuple
 from xml.etree import ElementTree as ET
@@ -36,19 +41,14 @@ PASSI = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 
 
 def ingerisci(sorgente: str, **opzioni) -> Spartito:
-    """Punto d'ingresso unico del Modulo 1."""
-    if re.match(r"^https?://", sorgente or ""):
-        return da_youtube(sorgente, **opzioni)
-    ext = os.path.splitext(sorgente)[1].lower()
+    """Punto d'ingresso unico del Modulo 1: accetta solo MusicXML."""
+    ext = os.path.splitext(sorgente or "")[1].lower()
     if ext in (".xml", ".musicxml", ".mxl"):
         return da_musicxml(sorgente)
-    if ext in (".mid", ".midi"):
-        return da_midi(sorgente, **opzioni)
-    if ext == ".pdf":
-        return da_pdf(sorgente, **opzioni)
-    if ext in (".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".mkv"):
-        return da_audio(sorgente, **opzioni)
-    raise ValueError(f"Formato non riconosciuto: {ext or sorgente}")
+    raise ValueError(
+        f"Formato non supportato: {ext or sorgente}. L'arrangiatore legge "
+        "solo MusicXML (.xml, .musicxml, .mxl): da Dorico, MuseScore o "
+        "Sibelius si ottiene con «Esporta > MusicXML».")
 
 
 # ==========================================================================
@@ -98,9 +98,17 @@ def _classifica_parti(parti: List[ET.Element]) -> Tuple[str, Optional[int]]:
     Il riconoscimento e' strutturale, non si fida dei nomi: una parte solista
     ha un rigo solo e suona quasi sempre una nota per volta; il pianoforte ha
     due righi (o comunque una scrittura densa).
+
+    Terzo caso, il LEAD SHEET: una sola parte, un rigo, una nota per volta —
+    la melodia e basta, di solito con le sigle sopra. Va riconosciuto
+    esplicitamente, perche' trattato come riduzione pianistica produce un
+    errore grave e silenzioso: non trovando un rigo di basso, l'analisi
+    cerca il basso dentro le note che ci sono, cioe' nella melodia stessa.
+    Misurato sull'Inno alla gioia in forma di lead sheet: 33 note di «basso»
+    su 54 erano note della melodia, nel registro del canto, e violoncello e
+    sinistra del pianoforte suonavano un'eco della melodia invece di un
+    basso.
     """
-    if len(parti) < 2:
-        return "pianistico", None
 
     profili = []
     for parte in parti:
@@ -129,6 +137,8 @@ def _classifica_parti(parti: List[ET.Element]) -> Tuple[str, Optional[int]]:
     def e_tastiera(p: dict) -> bool:
         return p["righi"] >= 2 or p["accordi"] > p["note"] * 0.25
 
+    if len(profili) == 1:
+        return ("lead_sheet", 0) if e_solista(profili[0]) else ("pianistico", None)
     solisti = [i for i, p in enumerate(profili) if e_solista(p)]
     tastiere = [i for i, p in enumerate(profili) if e_tastiera(p)]
     if len(solisti) == 1 and tastiere and solisti[0] not in tastiere:
@@ -274,7 +284,14 @@ def da_musicxml(percorso: str) -> Spartito:
     tutte: List[Nota] = []
     dinamiche: List[Tuple[float, str]] = []
     forcelle: List[Tuple[float, float, str]] = []
-    sigle: List[Tuple[float, int, str, Optional[int]]] = []
+    # Le sigle si raccolgono PER PARTE e poi si tiene la prima parte che ne
+    # ha. Prima si leggevano solo dalla prima parte del file, e in una
+    # partitura voce + pianoforte esportata col pianoforte in testa le sigle
+    # — che stanno quasi sempre sulla voce — venivano ignorate del tutto.
+    # Non si fondono quelle di parti diverse: se due parti le portano
+    # entrambe, di solito sono la stessa griglia, e fonderle raddoppierebbe
+    # ogni cambio d'accordo con piccoli scarti di collocazione.
+    sigle_per_parte: Dict[int, List[Tuple[float, int, str, Optional[int]]]] = {}
     aperta: Optional[Tuple[float, str]] = None
 
     for idx_parte, parte in enumerate(parti):
@@ -294,11 +311,21 @@ def da_musicxml(percorso: str) -> Spartito:
 
             for el in list(mis):
                 t = _tag(el)
-                if t == "harmony" and idx_parte == 0:
+                if t == "harmony":
                     letta = _sigla(el)
                     if letta:
-                        sigle.append((offset_misura + cursore, letta[0],
-                                      letta[1], letta[2]))
+                        # <offset> sposta la sigla rispetto al punto in cui
+                        # compare nel flusso: e' cosi' che Dorico e MuseScore
+                        # scrivono un cambio d'accordo a meta' di una nota
+                        # lunga. Ignorarlo anticipa il cambio all'attacco
+                        # della nota.
+                        scarto = el.find("./{*}offset")
+                        spostamento = (float(_testo(scarto, "0")) / divisioni
+                                       if scarto is not None else 0.0)
+                        istante = max(offset_misura,
+                                      offset_misura + cursore + spostamento)
+                        sigle_per_parte.setdefault(idx_parte, []).append(
+                            (istante, letta[0], letta[1], letta[2]))
                 if t == "direction" and idx_parte == 0:
                     din = _dinamica(el)
                     if din:
@@ -367,6 +394,8 @@ def da_musicxml(percorso: str) -> Spartito:
         forcelle.append((aperta[0], misure[-1].fine, aperta[1]))
     sp.dinamiche = sorted(set(dinamiche))
     sp.gradazioni = sorted(set(forcelle))
+    sigle = next((sigle_per_parte[i] for i in sorted(sigle_per_parte)
+                  if sigle_per_parte[i]), [])
     sp.sigle = sorted(set(sigle))
     sp.anacrusi = misure[0].durata if misure and misure[0].anacrusi else 0.0
     sp.ordina()
@@ -397,6 +426,10 @@ def _sigla(direzione: ET.Element) -> Optional[Tuple[int, str, Optional[int]]]:
         return None
     pc = PASSI_PC[passo] + int(float(_testo(root.find("./{*}root-alter"), "0")))
     kind = _testo(direzione.find("./{*}kind")).strip().lower()
+    if kind == "none":
+        # «N.C.», nessun accordo: non e' una triade maggiore sulla fondamentale
+        # che l'esportatore ha messo per riempire il campo obbligatorio
+        return None
     qualita = KIND_QUALITA.get(kind, "maj")
     basso = None
     b = direzione.find("./{*}bass")
@@ -459,433 +492,3 @@ def _unisci_legature(sp: Spartito) -> None:
         sp.note = [n for n in sp.note if id(n) not in da_togliere]
 
 
-# ==========================================================================
-# Ramo A' - MIDI (Standard MIDI File, parser stdlib)
-# ==========================================================================
-
-
-def _var_len(dati: bytes, i: int) -> Tuple[int, int]:
-    val = 0
-    while True:
-        b = dati[i]
-        i += 1
-        val = (val << 7) | (b & 0x7F)
-        if not b & 0x80:
-            return val, i
-
-
-def leggi_smf(percorso: str) -> Tuple[List[Tuple[float, float, int, int]], float, Tuple[int, int]]:
-    """Ritorna (note[(inizio_q, durata_q, midi, canale)], bpm, (num, den))."""
-    with open(percorso, "rb") as f:
-        dati = f.read()
-    if dati[:4] != b"MThd":
-        raise ValueError("File MIDI non valido")
-    _, formato, ntracce, divisione = struct.unpack(">IHHH", dati[4:14])
-    if divisione & 0x8000:
-        raise ValueError("MIDI SMPTE non supportato")
-    tpq = float(divisione)
-    i = 14
-    note: List[Tuple[float, float, int, int]] = []
-    bpm = 120.0
-    metro = (4, 4)
-
-    for _ in range(ntracce):
-        if dati[i:i + 4] != b"MTrk":
-            break
-        lung = struct.unpack(">I", dati[i + 4:i + 8])[0]
-        fine = i + 8 + lung
-        j = i + 8
-        tempo_abs = 0
-        stato = 0
-        aperte: Dict[Tuple[int, int], List[int]] = {}
-        while j < fine:
-            delta, j = _var_len(dati, j)
-            tempo_abs += delta
-            b = dati[j]
-            if b & 0x80:
-                stato = b
-                j += 1
-            if stato == 0xFF:
-                tipo = dati[j]; j += 1
-                lun, j = _var_len(dati, j)
-                blocco = dati[j:j + lun]; j += lun
-                if tipo == 0x51 and lun == 3:
-                    usec = (blocco[0] << 16) | (blocco[1] << 8) | blocco[2]
-                    bpm = 60_000_000.0 / usec
-                elif tipo == 0x58 and lun >= 2:
-                    metro = (blocco[0], 2 ** blocco[1])
-            elif stato in (0xF0, 0xF7):
-                lun, j = _var_len(dati, j)
-                j += lun
-            else:
-                alto = stato & 0xF0
-                canale = stato & 0x0F
-                if alto in (0x80, 0x90, 0xA0, 0xB0, 0xE0):
-                    d1, d2 = dati[j], dati[j + 1]; j += 2
-                    if alto == 0x90 and d2 > 0:
-                        aperte.setdefault((canale, d1), []).append(tempo_abs)
-                    elif alto == 0x80 or (alto == 0x90 and d2 == 0):
-                        pila = aperte.get((canale, d1))
-                        if pila:
-                            t0 = pila.pop(0)
-                            note.append((t0 / tpq, max(1, tempo_abs - t0) / tpq, d1, canale))
-                else:
-                    j += 1
-        i = fine
-    note.sort()
-    return note, bpm, metro
-
-
-def da_midi(percorso: str, livello_quantizzazione: float = 0.25, **_) -> Spartito:
-    grezze, bpm, metro = leggi_smf(percorso)
-    note = [Nota(midi=m, inizio=t, durata=d, rigo=1)
-            for (t, d, m, c) in grezze if c != 9]
-    sp = Spartito(titolo=os.path.basename(percorso), note=note, bpm=bpm)
-    _costruisci_misure(sp, metro)
-    return riduzione_pianistica(sp, livello_quantizzazione)
-
-
-# ==========================================================================
-# Ramo C - PDF / immagine (riconoscimento ottico della notazione)
-# ==========================================================================
-
-
-def stato_dipendenze_omr() -> Dict[str, bool]:
-    """Motori di riconoscimento ottico disponibili sulla macchina."""
-    stato = {"oemer": False, "audiveris": shutil.which("audiveris") is not None}
-    try:
-        import oemer  # noqa: F401
-        stato["oemer"] = True
-    except ImportError:
-        pass
-    return stato
-
-
-def pdf_in_musicxml(percorso: str, cartella: str = "tmp_smim") -> str:
-    """
-    Converte un PDF (o un'immagine) in MusicXML con un motore OMR.
-
-    Si prova prima Audiveris, se installato: e' il piu' accurato sulla musica
-    stampata. In alternativa `oemer`, che si installa con pip ma richiede molta
-    memoria. Nessuno dei due e' incluso: sono pesanti e non girano su un
-    servizio cloud gratuito.
-    """
-    os.makedirs(cartella, exist_ok=True)
-    stato = stato_dipendenze_omr()
-
-    if stato["audiveris"]:
-        import subprocess
-        esito = subprocess.run(
-            [shutil.which("audiveris"), "-batch", "-export",
-             "-output", cartella, "--", percorso],
-            capture_output=True, text=True, timeout=900)
-        prodotti = [os.path.join(cartella, f) for f in os.listdir(cartella)
-                    if f.lower().endswith((".mxl", ".musicxml", ".xml"))]
-        if prodotti:
-            return max(prodotti, key=os.path.getmtime)
-        raise RuntimeError("Audiveris non ha prodotto un MusicXML:\n"
-                           + (esito.stderr or esito.stdout)[-1500:])
-
-    if stato["oemer"]:
-        import subprocess
-        esito = subprocess.run([sys.executable, "-m", "oemer", percorso,
-                                "-o", cartella],
-                               capture_output=True, text=True, timeout=1800)
-        prodotti = [os.path.join(cartella, f) for f in os.listdir(cartella)
-                    if f.lower().endswith((".musicxml", ".xml"))]
-        if prodotti:
-            return max(prodotti, key=os.path.getmtime)
-        raise RuntimeError("oemer non ha prodotto un MusicXML:\n"
-                           + (esito.stderr or esito.stdout)[-1500:])
-
-    raise RuntimeError(
-        "Nessun motore di riconoscimento ottico disponibile.\n"
-        "Opzioni, dalla piu' affidabile:\n"
-        "  1. Audiveris (gratuito, Java): installalo e mettilo nel PATH;\n"
-        "  2. pip install oemer (solo Python, ma richiede molta memoria);\n"
-        "  3. converti il PDF in MusicXML con un servizio esterno "
-        "(MuseScore, PlayScore, Soundslice) e carica il file risultante.\n"
-        "In ogni caso RILEGGI il MusicXML prodotto prima di arrangiarlo: "
-        "l'OMR sbaglia spesso alterazioni, voci e legature.")
-
-
-def da_pdf(percorso: str, cartella_tmp: str = "tmp_smim", **opz) -> Spartito:
-    xml = pdf_in_musicxml(percorso, cartella_tmp)
-    sp = da_musicxml(xml)
-    sp.titolo = sp.titolo or os.path.splitext(os.path.basename(percorso))[0]
-    return sp
-
-
-# ==========================================================================
-# Ramo B - Audio / YouTube
-# ==========================================================================
-
-
-def stato_dipendenze_audio() -> Dict[str, bool]:
-    """
-    Verifica i tre pezzi necessari al Ramo B (audio/YouTube).
-    Serve all'interfaccia per avvisare PRIMA di iniziare, invece di far
-    fallire l'elaborazione a meta' strada.
-    """
-    stato = {"yt-dlp": False, "ffmpeg": shutil.which("ffmpeg") is not None,
-             "basic-pitch": False}
-    try:
-        import yt_dlp  # noqa: F401
-        stato["yt-dlp"] = True
-    except ImportError:
-        pass
-    try:
-        import basic_pitch  # noqa: F401
-        stato["basic-pitch"] = True
-    except ImportError:
-        pass
-    return stato
-
-
-def istruzioni_dipendenze(mancanti: List[str]) -> str:
-    """Messaggio d'aiuto pronto da mostrare all'utente."""
-    comandi = []
-    if "yt-dlp" in mancanti:
-        comandi.append("pip install -U yt-dlp")
-    if "basic-pitch" in mancanti:
-        comandi.append("pip install basic-pitch")
-    testo = ("Per usare audio e YouTube mancano: " + ", ".join(mancanti) + ".\n")
-    if comandi:
-        testo += ("Con l'ambiente virtuale ATTIVO (deve comparire (.venv) "
-                  "all'inizio della riga del prompt) esegui:\n  "
-                  + "\n  ".join(comandi) + "\n")
-    if "ffmpeg" in mancanti:
-        testo += ("ffmpeg non e' un pacchetto Python: installalo con "
-                  "'winget install Gyan.FFmpeg' (Windows) o da ffmpeg.org, "
-                  "poi CHIUDI E RIAPRI il prompt.\n")
-    return testo
-
-
-def scarica_youtube(url: str, cartella: str = ".", formato: str = "wav") -> str:
-    """
-    Estrae la traccia audio da un link YouTube.
-
-    Richiede `yt-dlp` E `ffmpeg` nel PATH: senza ffmpeg yt-dlp scarica il flusso
-    ma non puo' convertirlo, ed e' la causa piu' frequente di fallimento.
-    Il nome del file prodotto viene ricavato dal filesystem e non indovinato:
-    l'estensione dopo il post-processing cambia rispetto a quella scaricata.
-    """
-    stato = stato_dipendenze_audio()
-    mancanti = [k for k in ("yt-dlp", "ffmpeg") if not stato[k]]
-    if mancanti:
-        raise RuntimeError(istruzioni_dipendenze(mancanti))
-    import yt_dlp  # type: ignore
-
-    os.makedirs(cartella, exist_ok=True)
-    opts = {
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(cartella, "%(id)s.%(ext)s"),
-        "postprocessors": [{"key": "FFmpegExtractAudio",
-                            "preferredcodec": formato,
-                            "preferredquality": "192"}],
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "nocheckcertificate": True,
-        "retries": 3,
-    }
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-    except Exception as e:  # yt_dlp.utils.DownloadError e affini
-        raise RuntimeError(
-            f"Download da YouTube fallito: {e}\n"
-            "Cause tipiche: link privato o con restrizioni d'eta', rete "
-            "bloccata, oppure yt-dlp non aggiornato "
-            "(pip install -U yt-dlp).") from e
-
-    if info is None:
-        raise RuntimeError("YouTube non ha restituito alcuna informazione sul video.")
-    if "entries" in info:                    # playlist nonostante noplaylist
-        voci = [v for v in info["entries"] if v]
-        if not voci:
-            raise RuntimeError("La playlist non contiene video scaricabili.")
-        info = voci[0]
-
-    atteso = os.path.join(cartella, f"{info['id']}.{formato}")
-    if os.path.exists(atteso):
-        return atteso
-    # il post-processing puo' cambiare l'estensione: si cerca sul filesystem
-    candidati = [os.path.join(cartella, f) for f in os.listdir(cartella)
-                 if f.startswith(str(info.get("id", "")))]
-    audio = [c for c in candidati
-             if os.path.splitext(c)[1].lower() in (".wav", ".mp3", ".m4a", ".opus",
-                                                   ".ogg", ".flac", ".webm")]
-    if not audio:
-        raise RuntimeError(
-            "Download completato ma nessun file audio trovato in "
-            f"{cartella}: verifica che ffmpeg sia installato correttamente.")
-    return max(audio, key=os.path.getsize)
-
-
-def _pulisci_output_precedenti(cartella: str, base: str) -> None:
-    """
-    Toglie di mezzo un MIDI prodotto da Basic Pitch in una sessione
-    precedente con lo stesso nome.
-
-    Basic Pitch si rifiuta di sovrascrivere un file gia' presente. Il
-    problema si presenta soprattutto con l'importazione multitraccia: Demucs
-    chiama le tracce separate sempre `vocals.wav`, `bass.wav`, `other.wav`,
-    a prescindere dal brano, quindi ogni nuova importazione da audio scrive
-    negli stessi percorsi della precedente e la trascrizione fallisce dalla
-    seconda volta in poi. Qui si ripulisce prima di trascrivere.
-    """
-    for pregresso in (glob.glob(os.path.join(cartella, base + "*.mid"))
-                      + glob.glob(os.path.join(cartella, base + "*.midi"))):
-        try:
-            os.remove(pregresso)
-        except OSError:
-            pass
-
-
-def audio_in_midi(percorso_audio: str, cartella: str = ".",
-                  midi_tempo: Optional[float] = None) -> str:
-    """
-    Trascrizione audio->MIDI con Spotify Basic Pitch (import pigro).
-
-    `midi_tempo`: Basic Pitch non conosce il tempo del brano, ma per
-    scrivere un file MIDI deve comunque scegliere una conversione fra
-    secondi e tick — lo fa con un tempo fisso (di default 120 bpm) che non
-    ha alcun rapporto con il tempo reale del pezzo. Per l'uso normale (un
-    unico file audio ridotto a pianoforte) questo non conta, perche' tutto
-    il MIDI risultante viene poi riquantizzato da capo sulla sua stessa
-    griglia interna. Ma quando le "battute" di questo MIDI devono restare
-    confrontabili con quelle di un'altra traccia scandita con un orologio
-    diverso — come nella separazione multitraccia, dove batteria e voce
-    vanno allineate alla stessa linea del tempo — serve un tempo esplicito e
-    noto. Passando `midi_tempo=60.0` un quarto nel MIDI dura esattamente un
-    secondo: le "durate in quarti" lette da questo file sono, senza alcuna
-    ambiguita', durate in secondi.
-    """
-    try:
-        from basic_pitch.inference import predict_and_save  # type: ignore
-        from basic_pitch import ICASSP_2022_MODEL_PATH  # type: ignore
-    except ImportError as e:  # pragma: no cover
-        raise RuntimeError(istruzioni_dipendenze(["basic-pitch"])) from e
-    os.makedirs(cartella, exist_ok=True)
-    base = os.path.splitext(os.path.basename(percorso_audio))[0]
-    _pulisci_output_precedenti(cartella, base)
-    try:
-        argomenti = dict(model_or_model_path=ICASSP_2022_MODEL_PATH)
-        if midi_tempo is not None:
-            argomenti["midi_tempo"] = midi_tempo
-        predict_and_save([percorso_audio], cartella, True, False, False, False,
-                         **argomenti)
-    except Exception as e:
-        raise RuntimeError(f"Trascrizione audio fallita: {e}") from e
-    trovati = [os.path.join(cartella, f) for f in os.listdir(cartella)
-               if f.startswith(base) and f.lower().endswith((".mid", ".midi"))]
-    if not trovati:
-        raise RuntimeError(
-            "Basic Pitch non ha prodotto alcun MIDI: controlla che il file "
-            "audio non sia vuoto o protetto.")
-    return max(trovati, key=os.path.getmtime)
-
-
-def da_audio(percorso: str, cartella_tmp: str = "tmp_smim", **opz) -> Spartito:
-    os.makedirs(cartella_tmp, exist_ok=True)
-    mid = audio_in_midi(percorso, cartella_tmp)
-    sp = da_midi(mid, **opz)
-    sp.titolo = os.path.splitext(os.path.basename(percorso))[0]
-    return sp
-
-
-def da_youtube(url: str, cartella_tmp: str = "tmp_smim", **opz) -> Spartito:
-    os.makedirs(cartella_tmp, exist_ok=True)
-    audio = scarica_youtube(url, cartella_tmp)
-    sp = da_audio(audio, cartella_tmp=cartella_tmp, **opz)
-    return sp
-
-
-# ==========================================================================
-# Quantizzazione + riduzione pianistica
-# ==========================================================================
-
-
-def _costruisci_misure(sp: Spartito, metro: Tuple[int, int] = (4, 4)) -> None:
-    num, den = metro
-    piena = num * 4.0 / den
-    fine = max((n.fine for n in sp.note), default=piena)
-    n_mis = max(1, int(fine / piena + 0.999))
-    sp.misure = [Misura(numero=i + 1, inizio=i * piena, durata=piena, num=num, den=den)
-                 for i in range(n_mis)]
-
-
-def quantizza(sp: Spartito, griglia: float = 0.25, durata_minima: float = 0.25) -> Spartito:
-    """Aggancia attacchi e durate alla griglia, elimina scarti e sovrapposizioni."""
-    pulite: List[Nota] = []
-    for n in sp.note:
-        inizio = round(n.inizio / griglia) * griglia
-        durata = max(griglia, round(n.durata / griglia) * griglia)
-        if durata < durata_minima - 1e-9:
-            continue
-        n.inizio, n.durata = inizio, durata
-        pulite.append(n)
-    # rimuove i doppioni esatti (stessa altezza, stesso attacco)
-    visti = set()
-    finali = []
-    for n in sorted(pulite, key=lambda x: (x.inizio, x.midi, -x.durata)):
-        chiave = (round(n.inizio, 4), n.midi)
-        if chiave in visti:
-            continue
-        visti.add(chiave)
-        finali.append(n)
-    sp.note = finali
-    sp.ordina()
-    return sp
-
-
-def riduzione_pianistica(sp: Spartito, griglia: float = 0.25,
-                         max_voci_per_rigo: int = 4) -> Spartito:
-    """
-    Comprime un flusso MIDI grezzo in due righi leggibili (violino/basso):
-    quantizza, sceglie un punto di divisione adattivo, limita la densita'
-    e mantiene melodia (voce superiore), accordi e arpeggi.
-    """
-    quantizza(sp, griglia=griglia, durata_minima=griglia)
-    if not sp.note:
-        return sp
-
-    altezze = sorted(n.midi for n in sp.note)
-    mediana = altezze[len(altezze) // 2]
-    divisione = min(67, max(52, mediana))
-
-    for n in sp.note:
-        n.rigo = 1 if n.midi >= divisione else 2
-
-    # limita la densita' per rigo su ogni attacco: tiene estremi + note vicine
-    per_attacco: Dict[Tuple[float, int], List[Nota]] = {}
-    for n in sp.note:
-        per_attacco.setdefault((round(n.inizio, 4), n.rigo), []).append(n)
-    tenute: List[Nota] = []
-    for gruppo in per_attacco.values():
-        gruppo.sort(key=lambda n: n.midi)
-        if len(gruppo) <= max_voci_per_rigo:
-            tenute.extend(gruppo)
-        else:
-            scelte = [gruppo[0], gruppo[-1]]
-            centro = gruppo[1:-1]
-            centro.sort(key=lambda n: -n.durata)
-            scelte.extend(centro[:max_voci_per_rigo - 2])
-            tenute.extend(scelte)
-    sp.note = tenute
-
-    # evita sovrapposizioni della stessa altezza
-    per_altezza: Dict[int, List[Nota]] = {}
-    for n in sp.note:
-        per_altezza.setdefault(n.midi, []).append(n)
-    for gruppo in per_altezza.values():
-        gruppo.sort(key=lambda n: n.inizio)
-        for a, b in zip(gruppo, gruppo[1:]):
-            if a.fine > b.inizio + 1e-6:
-                a.durata = max(griglia, b.inizio - a.inizio)
-
-    sp.ordina()
-    if not sp.misure:
-        _costruisci_misure(sp)
-    return sp
