@@ -24,6 +24,44 @@ from urllib.parse import quote
 import streamlit as st
 import streamlit.components.v1 as components
 
+st.set_page_config(page_title="Arranger SMIM", page_icon="🎼", layout="wide")
+
+# --------------------------------------------------------------------------
+# Controllo dei file PRIMA di importare il motore.
+#
+# Se sul server alcuni file sono di una versione e altri di un'altra
+# (aggiornamento del repository fatto a meta'), gli import qui sotto
+# fallirebbero con un errore che non dice nulla. Il manifesto elenca
+# l'impronta di ogni file dello zip: qui si confronta e si dice quali file
+# ricaricare. Nessun import da `arranger`, perche' e' proprio cio' che
+# potrebbe essere rotto.
+# --------------------------------------------------------------------------
+try:
+    import controllo_file as _cf
+    _versione_attesa, _mancanti, _diversi = _cf.differenze()
+except Exception:                    # controllo_file.py stesso assente o vecchio
+    _versione_attesa, _mancanti, _diversi = None, [], []
+if _mancanti or _diversi:
+    _en = st.query_params.get("lang") == "en"
+    st.error(
+        (f"**Files out of sync.** The repository does not match version "
+         f"{_versione_attesa}: some files were not updated. Upload **the "
+         f"whole content** of the zip again (files and folders, at the root "
+         f"of the repository) and restart the app.")
+        if _en else
+        (f"**File non allineati.** Il repository non corrisponde alla "
+         f"versione {_versione_attesa}: alcuni file non sono stati "
+         f"aggiornati. Ricarica **tutto il contenuto** dello zip (file e "
+         f"cartelle, nella radice del repository) e riavvia l'app."))
+    if _mancanti:
+        st.markdown(("**Missing:**" if _en else "**Mancano:**") + "\n"
+                    + "\n".join(f"- `{f}`" for f in _mancanti))
+    if _diversi:
+        st.markdown(("**Old or different version:**" if _en
+                     else "**Versione vecchia o diversa:**") + "\n"
+                    + "\n".join(f"- `{f}`" for f in _diversi))
+    st.stop()
+
 from arranger import Configurazione, esegui
 from arranger import ia
 from arranger import feedback as FB
@@ -37,8 +75,6 @@ from arranger.versione import (COMPILATO, DATA, DATA_EN, NOVITA, NOVITA_EN,
                                PRECEDENTE, VERSIONE)
 
 DESTINATARIO = "claudiobianchi82@gmail.com"
-
-st.set_page_config(page_title="Arranger SMIM", page_icon="🎼", layout="wide")
 
 # --------------------------------------------------------------------------
 # Lingua: prima di tutto, perche' da lei dipende ogni testo della pagina.
@@ -97,7 +133,7 @@ def valore(widget, nome: str, etichetta: str, predefinito, **kw):
 # sul server e' di un'altra versione — succede caricando su GitHub solo una
 # parte dei file — l'app non deve partire con un errore incomprensibile a
 # meta' esecuzione, ma dire subito che cosa manca.
-VERSIONE_INTERFACCIA = "0.9.4"
+VERSIONE_INTERFACCIA = "0.9.5"
 if VERSIONE != VERSIONE_INTERFACCIA:
     st.error(T("file_non_allineati", ui=VERSIONE_INTERFACCIA, motore=VERSIONE))
     st.stop()

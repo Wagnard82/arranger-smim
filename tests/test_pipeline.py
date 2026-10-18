@@ -2245,6 +2245,46 @@ def test_feedback_allegati(inno):
     z = zipfile.ZipFile(io.BytesIO(FB.zip_allegati([("a.xml", b"1"), ("a.xml", b"2")])))
     verifica(sorted(z.namelist()) == ["a.xml", "a_2.xml"], f"zip: {z.namelist()}")
 
+
+def test_manifesto_file():
+    """manifesto.json e' aggiornato, e un file vecchio o mancante viene
+    riconosciuto per nome (il caso del repository aggiornato a meta')."""
+    import shutil
+    import tempfile
+    radice = os.path.dirname(QUI)
+    sys.path.insert(0, radice)
+    import controllo_file
+    from arranger.versione import VERSIONE
+    versione, mancanti, diversi = controllo_file.differenze(radice)
+    verifica(versione == VERSIONE,
+             f"manifesto.json della {versione}, codice della {VERSIONE}: "
+             "eseguire «python controllo_file.py --scrivi»")
+    verifica(not mancanti and not diversi,
+             f"manifesto.json non aggiornato (mancanti {mancanti}, diversi "
+             f"{diversi}): eseguire «python controllo_file.py --scrivi»")
+    copia = os.path.join(tempfile.mkdtemp(), "server")
+    shutil.copytree(radice, copia, ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    with open(os.path.join(copia, "arranger", "esportatore.py"), "a") as f:
+        f.write("\n# versione vecchia\n")
+    os.remove(os.path.join(copia, "arranger", "feedback.py"))
+    # righe Windows: non devono contare come differenza
+    p = os.path.join(copia, "arranger", "lingua.py")
+    with open(p, encoding="utf-8") as f:
+        testo = f.read()
+    with open(p, "w", encoding="utf-8", newline="\r\n") as f:
+        f.write(testo)
+    _, mancanti, diversi = controllo_file.differenze(copia)
+    verifica(mancanti == ["arranger/feedback.py"], f"mancanti: {mancanti}")
+    verifica(diversi == ["arranger/esportatore.py"], f"diversi: {diversi}")
+    os.remove(os.path.join(copia, "manifesto.json"))
+    verifica(controllo_file.differenze(copia)[0] is None,
+             "manifesto assente non riconosciuto")
+    # e app.py controlla PRIMA di importare il motore
+    with open(os.path.join(radice, "app.py"), encoding="utf-8") as f:
+        app = f.read()
+    verifica(app.index("_cf.differenze()") < app.index("from arranger import"),
+             "app.py importa il motore prima del controllo dei file")
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -2323,6 +2363,7 @@ if __name__ == "__main__":
     test_cataloghi_completi()
     test_versione_inglese(inno)
     test_feedback_allegati(inno)
+    test_manifesto_file()
 
     print(f"\n{OK} verifiche superate, {len(KO)} fallite")
     for k in KO:

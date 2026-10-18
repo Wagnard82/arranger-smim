@@ -10,17 +10,28 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple
 
-VERSIONE = "0.9.4"
+VERSIONE = "0.9.5"
 DATA = "ottobre 2026"
 DATA_EN = "October 2026"
-PRECEDENTE = "0.9.3"
+PRECEDENTE = "0.9.4"
 
 # Marca temporale del pacchetto: serve a capire a colpo d'occhio QUALE copia
 # del progetto sta girando, quando ne esistono piu' d'una sul disco.
-COMPILATO = "17 ottobre 2026 ore 11.00"
+COMPILATO = "18 ottobre 2026 ore 21.15"
 
 # (titolo della sezione, [voci])
 NOVITA: List[Tuple[str, List[str]]] = [
+    ("Controllo dei file all'avvio, piu' preciso", [
+        "Aggiornando il repository solo in parte, l'app si fermava con un "
+        "ImportError incomprensibile (es. «from arranger.esportatore import "
+        "sigla_scritta»): il controllo di versione scattava dopo gli import "
+        "del motore, cioe' troppo tardi. Ora il controllo avviene prima, e "
+        "dice esattamente QUALI file mancano o sono rimasti alla versione "
+        "vecchia.",
+        "Lo zip contiene manifesto.json con l'impronta di ogni file; da riga "
+        "di comando «python controllo_file.py» fa la stessa verifica in "
+        "locale.",
+    ]),
     ("Feedback con allegati (nuovo)", [
         "Nel modulo di feedback si puo' allegare il brano dell'ultimo "
         "arrangiamento: insieme al file arrivano le impostazioni usate "

@@ -1,0 +1,28 @@
+{
+ "file": {
+  "app.py": "2fa2799bcee401bc170cd774aa88f07bce5d93fb3df606ba7912ecac0708c9b0",
+  "arranger/__init__.py": "fa8a933ccfbbab814d709d41cd8b3a6882da3443e33d5bad5b718b80c355de1e",
+  "arranger/analizzatore.py": "d12d63d58f51cc0ffa460eb31696a0f4d8620e71d5a134d83fe956fbcceb9da3",
+  "arranger/anteprima.py": "17b3a6a7ef38fd98f6102bbd11f125a1d276d85ba4fa13716a2355991f5eb3ea",
+  "arranger/distribuzione.py": "218b4e47cb11167ca6220bc14a6e1f581ffcbbcececaff107fc8d056fb4fc330",
+  "arranger/esportatore.py": "d357a37debebd6be15cd0c6c832267230bef04f50d2e2ff31ac36856a4564159",
+  "arranger/feedback.py": "742c61b2f4fcc9386e5f12f58a173cdffd5bf51e78b8370c87d1f08b16f0f8e6",
+  "arranger/frasi_music21.py": "de1b66eb0ccb2ab4ef2652ac0d1066c73cfc0456fc2d535174ced3d252dfc995",
+  "arranger/ia.py": "ea7dc1c4b16c9c1e62477c64a34569a309503db61e980d962a32af6c310b9cc6",
+  "arranger/ingestione.py": "0b423d31a09b598bcd682bc76afd2323683c10dc6b4e5fdde760d23c704b3b23",
+  "arranger/lilypond.py": "8dc0a8ef104dac6098445430b89056ad2e284acfd685ef1e3043d022a7c39b3e",
+  "arranger/lingua.py": "291fa0090cdbbb546955d7d68a0bd72586ba10ba7242832122fcfb9fac7e83d0",
+  "arranger/modello.py": "927589da82fb716f1025b867d1b0445e5e33c7747af749a8cd36353733d1f933",
+  "arranger/orchestratore.py": "241ec8b59a2ad7d7680b6e8f77c8d84051466285b6522b4f4dc857ce6d6c85f1",
+  "arranger/pipeline.py": "d813fde901ef72327d8554c0108f8c4d66055fa4ffc65fa529d0385ef44fb970",
+  "arranger/strumenti.py": "fbcdeaf34018d61c2270bd9bd8183be1a8b16e78318ccede712560f9b067c4eb",
+  "arranger/testi_interfaccia.py": "53534dc352068cbba7fd33d50d6d274d4a58b2e43278bd65c00246045d12f11d",
+  "arranger/versione.py": "ccfe8da4be867e063deeed24daf1c1750c9a395bf777101e4c8c195b1abb1b1b",
+  "arranger/vincoli.py": "36a75add4a41eda49065dfd6abf2fce4e4d2aad327aec456f560ddc97ea6e428",
+  "controllo_file.py": "abec0ac6ec121da401e9467fcadf16e3c300d76193803c1a25d78203566ba777",
+  "esempi/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "esempi/genera_esempi.py": "2e5464e4c3b6732f6139c2fce0f121bfd666b7eef1f477c2946f72a8f04f9ca9",
+  "requirements.txt": "869ca61ac74f9d98d4a908a8b0cfeeabf3d022e5fc88980d283bc1bb9d8862b7"
+ },
+ "versione": "0.9.5"
+}
