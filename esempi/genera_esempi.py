@@ -675,6 +675,86 @@ def basso_ritmico(percorso):
     return percorso
 
 
+def lead_sheet(percorso):
+    """
+    LEAD SHEET: la sola melodia su un rigo, con le sigle degli accordi sopra.
+    E' il formato dei canzonieri e dei fake book, e il modo piu' rapido per un
+    docente di scrivere un brano da far arrangiare: niente pianoforte, niente
+    basso, solo la linea e l'armonia.
+
+    L'Inno alla gioia completo, 16 battute, con un cambio d'accordo a meta'
+    battuta (b. 8, 12, 16) e due accordi di settima: verifica che le sigle
+    vengano lette anche quando non cadono sul battere, e che dall'armonia
+    nascano basso e accompagnamento, che nel file non ci sono.
+    """
+    E, F, G, D, C, G3 = 64, 65, 67, 62, 60, 55
+    melodia = [
+        [(E, 1), (E, 1), (F, 1), (G, 1)],
+        [(G, 1), (F, 1), (E, 1), (D, 1)],
+        [(C, 1), (C, 1), (D, 1), (E, 1)],
+        [(E, 1.5), (D, 0.5), (D, 2)],
+        [(E, 1), (E, 1), (F, 1), (G, 1)],
+        [(G, 1), (F, 1), (E, 1), (D, 1)],
+        [(C, 1), (C, 1), (D, 1), (E, 1)],
+        [(D, 1.5), (C, 0.5), (C, 2)],
+        [(D, 1), (D, 1), (E, 1), (C, 1)],
+        [(D, 1), (E, 0.5), (F, 0.5), (E, 1), (C, 1)],
+        [(D, 1), (E, 0.5), (F, 0.5), (E, 1), (D, 1)],
+        [(C, 1), (D, 1), (G3, 2)],
+        [(E, 1), (E, 1), (F, 1), (G, 1)],
+        [(G, 1), (F, 1), (E, 1), (D, 1)],
+        [(C, 1), (C, 1), (D, 1), (E, 1)],
+        [(D, 1.5), (C, 0.5), (C, 2)],
+    ]
+    # (quarto della battuta, fondamentale, kind)
+    sigle = [
+        [(0, "C", "major")], [(0, "G", "major")], [(0, "C", "major")],
+        [(0, "G", "dominant")],
+        [(0, "C", "major")], [(0, "G", "major")], [(0, "C", "major")],
+        [(0, "G", "dominant"), (2, "C", "major")],
+        [(0, "G", "major")], [(0, "C", "major")], [(0, "G", "major")],
+        [(0, "C", "major"), (2, "G", "dominant")],
+        [(0, "C", "major")], [(0, "G", "major")], [(0, "C", "major")],
+        [(0, "G", "dominant"), (2, "C", "major")],
+    ]
+    righe = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" '
+        '"http://www.musicxml.org/dtds/partwise.dtd">',
+        '<score-partwise version="4.0">',
+        "  <work><work-title>Inno alla Gioia (lead sheet)</work-title></work>",
+        "  <part-list>",
+        '    <score-part id="P1"><part-name>Melodia</part-name></score-part>',
+        "  </part-list>",
+        '  <part id="P1">',
+    ]
+    for i, battuta in enumerate(melodia):
+        righe.append(f'    <measure number="{i + 1}">')
+        if i == 0:
+            righe += ["      <attributes>",
+                      f"        <divisions>{DIV}</divisions>",
+                      "        <key><fifths>0</fifths></key>",
+                      "        <time><beats>4</beats><beat-type>4</beat-type></time>",
+                      "        <clef><sign>G</sign><line>2</line></clef>",
+                      "      </attributes>"]
+            righe += _dinamica("mf")
+        da_scrivere = list(sigle[i])
+        t = 0.0
+        for midi, q in battuta:
+            while da_scrivere and da_scrivere[0][0] <= t + 1e-6:
+                _q, passo, tipo = da_scrivere.pop(0)
+                righe += ['      <harmony>',
+                          f'        <root><root-step>{passo}</root-step></root>',
+                          f'        <kind>{tipo}</kind>',
+                          '      </harmony>']
+            righe += [r for r in _nota(midi, q, 1, 1) if "<staff>" not in r]
+            t += q
+        righe.append("    </measure>")
+    righe += ["  </part>", "</score-partwise>"]
+    _scrivi(percorso, righe)
+    return percorso
+
+
 if __name__ == "__main__":
     qui = os.path.dirname(os.path.abspath(__file__))
     print(inno_alla_gioia(os.path.join(qui, "inno_alla_gioia.xml")))
@@ -694,3 +774,4 @@ if __name__ == "__main__":
     print(sinistra_sotto_accordi(os.path.join(qui, "sinistra_sotto_accordi.xml")))
     print(con_sigle_e_sei_ottavi(os.path.join(qui, "sigle_sei_ottavi.xml")))
     print(voce_e_pianoforte(os.path.join(qui, "voce_e_piano.xml")))
+    print(lead_sheet(os.path.join(qui, "lead_sheet.xml")))

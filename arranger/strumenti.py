@@ -36,7 +36,9 @@ class Strumento:
     corde: List[int] = field(default_factory=list)
 
     def ambito(self, livello: str) -> tuple:
-        return self.estensione.get(livello, self.estensione["3a Media"])
+        from .lingua import normalizza_livello
+        return self.estensione.get(normalizza_livello(livello),
+                                   self.estensione["3a Media"])
 
 
 # --------------------------------------------------------------------------
@@ -174,7 +176,8 @@ LIVELLI: Dict[str, Livello] = {
 
 
 def livello(nome: str) -> Livello:
-    return LIVELLI.get(nome, LIVELLI["3a Media"])
+    from .lingua import normalizza_livello
+    return LIVELLI.get(normalizza_livello(nome), LIVELLI["3a Media"])
 
 
 def livello_parte(livello_parte_: Optional[str],
@@ -207,9 +210,10 @@ def strumento(chiave: str) -> Strumento:
     return REGISTRO[chiave]
 
 
-def nomi_parti(chiave: str, quantita: int) -> List[str]:
+def nomi_parti(chiave: str, quantita: int, lingua: str = "it") -> List[str]:
     """Genera i nomi dei divisi: 'Flauto' se 1, 'Flauto 1'/'Flauto 2' se piu'."""
-    s = REGISTRO[chiave]
+    from .lingua import nome_strumento
+    nome = nome_strumento(chiave, lingua)
     if quantita <= 1:
-        return [s.nome]
-    return [f"{s.nome} {i + 1}" for i in range(quantita)]
+        return [nome]
+    return [f"{nome} {i + 1}" for i in range(quantita)]

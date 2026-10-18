@@ -13,7 +13,7 @@ import struct
 from typing import Dict, List, Optional, Tuple
 from xml.sax.saxutils import escape
 
-from .modello import Evento, Misura, Parte, Partitura
+from .modello import Accordo, Evento, Misura, Parte, Partitura
 from .strumenti import strumento
 
 DIV = 24  # divisioni per quarto: consente 32esimi (3) e terzine di croma (8)
@@ -46,6 +46,54 @@ PERC_DISPLAY = {36: ("F", 4), 35: ("F", 4), 38: ("C", 5), 40: ("C", 5),
 
 
 # --------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------- sigle
+# I nomi interni degli accordi usano solo i diesis (A#, D#): in partitura
+# vanno scritti come li scriverebbe un musicista, cioe' secondo l'armatura.
+_SIGLE_DIESIS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+_SIGLE_BEMOLLI = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+# senza alterazioni in chiave: la grafia piu' comune nei lead sheet
+_SIGLE_NEUTRE = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
+_SUFFISSI_SIGLA = {
+    "maj": "", "min": "m", "dom7": "7", "min7": "m7", "maj7": "maj7",
+    "dim": "dim", "aug": "aug", "sus4": "sus4", "6": "6", "m6": "m6",
+    "dim7": "dim7", "m7b5": "m7b5",
+}
+
+
+def nome_per_sigla(pc: int, fifths: int) -> str:
+    tabella = (_SIGLE_BEMOLLI if fifths < 0 else
+               _SIGLE_DIESIS if fifths > 0 else _SIGLE_NEUTRE)
+    return tabella[pc % 12]
+
+
+def sigla_scritta(acc: Accordo, fifths: int) -> str:
+    """La sigla come va stampata: 'Bb', 'F#m7', 'C/E'."""
+    s = nome_per_sigla(acc.fondamentale, fifths) + _SUFFISSI_SIGLA.get(acc.qualita, "")
+    if acc.basso is not None and acc.basso != acc.fondamentale:
+        s += "/" + nome_per_sigla(acc.basso, fifths)
+    return s
+
+
+def cambi_di_sigla(armonia: List[Accordo]) -> List[Tuple[float, float, Accordo]]:
+    """
+    I punti in cui l'accordo CAMBIA: [(inizio, fine, accordo)].
+
+    L'analisi spezza un accordo alla stanghetta e puo' ripeterlo su piu'
+    movimenti; in partitura una sigla si scrive una volta sola e vale finche'
+    non ne arriva un'altra, come in qualsiasi lead sheet.
+    """
+    cambi: List[Tuple[float, float, Accordo]] = []
+    for acc in sorted(armonia, key=lambda a: a.inizio):
+        if acc.durata <= 1e-6:
+            continue
+        if cambi and cambi[-1][2].sigla() == acc.sigla() \
+                and acc.inizio <= cambi[-1][1] + 1e-6:
+            cambi[-1] = (cambi[-1][0], max(cambi[-1][1], acc.fine), cambi[-1][2])
+            continue
+        cambi.append((acc.inizio, acc.fine, acc))
+    return cambi
 
 
 def midi_a_pitch(midi: int, fifths: int = 0) -> Tuple[str, int, int]:
@@ -105,6 +153,7 @@ def scomponi(unita: int) -> List[Tuple[str, int, Optional[Tuple[int, int]], int]
 class EsportatoreMusicXML:
     def __init__(self, part: Partitura):
         self.p = part
+        self._cambi = cambi_di_sigla(part.armonia)
 
     # ------------------------------------------------------------------ API
     def xml(self) -> str:
@@ -244,7 +293,9 @@ class EsportatoreMusicXML:
             r.append("      </direction>")
             if self.p.swing:
                 r.append('      <direction placement="above">')
-                r.append("        <direction-type><words>Swing (crome in terzina)"
+                from .lingua import t as testo
+                r.append("        <direction-type><words>"
+                         f"{testo('swing', self.p.lingua)}"
                          "</words></direction-type>")
                 r.append("      </direction>")
         return r
@@ -254,16 +305,29 @@ class EsportatoreMusicXML:
         r: List[str] = []
         eventi = [e for e in parte.eventi if e.rigo == rigo] if righi == 2 else parte.eventi
         pezzi = self._taglia(eventi, m)
-        sigla_stampata: Optional[str] = None
+        # Le sigle si prendono dalla griglia armonica della partitura, non
+        # dalle note della parte: cosi' compaiono esattamente dove cambia
+        # l'accordo anche se in quel punto la parte tiene una nota o tace
+        # (prima, appese alle note, non uscivano quasi mai: arpeggi e
+        # accompagnamenti non le portavano). Solo sul rigo superiore, e solo
+        # per strumenti non traspositori (pianoforte, chitarra).
+        cambi = []
+        if parte.mostra_sigle and rigo == 1 and parte.trasposizione % 12 == 0:
+            cambi = [c for c in self._cambi
+                     if m.inizio - 1e-6 <= c[0] < m.fine - 1e-6]
+        k_sigla = 0
 
         for e, legato_prima, legato_dopo in pezzi:
             unita = _unita(e.durata)
             if unita <= 0:
                 continue
-            if parte.mostra_sigle and e.sigla and e.sigla != sigla_stampata \
-                    and not e.pausa:
-                r.extend(self._armonia(e.sigla, m.tonalita))
-                sigla_stampata = e.sigla
+            while k_sigla < len(cambi) and cambi[k_sigla][0] < e.fine - 1e-6:
+                t, _fine, acc = cambi[k_sigla]
+                scarto = max(0, int(round((t - e.inizio) * DIV)))
+                r.extend(self._armonia(sigla_scritta(acc, m.tonalita),
+                                       m.tonalita, scarto=scarto,
+                                       rigo=1 if righi == 2 else None))
+                k_sigla += 1
             if e.dinamica and not e.pausa:
                 r.append('      <direction placement="below"><direction-type>'
                          f"<dynamics><{e.dinamica}/></dynamics>"
@@ -371,7 +435,8 @@ class EsportatoreMusicXML:
         r.append("      </note>")
         return r
 
-    def _armonia(self, sigla: str, fifths: int) -> List[str]:
+    def _armonia(self, sigla: str, fifths: int, scarto: int = 0,
+                 rigo: Optional[int] = None) -> List[str]:
         import re
         m = re.match(r"^([A-G])([#b]?)(.*)$", sigla)
         if not m:
@@ -401,6 +466,11 @@ class EsportatoreMusicXML:
                     r.append(f"          <bass-alter>"
                              f"{1 if bm.group(2) == '#' else -1}</bass-alter>")
                 r.append("        </bass>")
+        if scarto:
+            # il cambio cade dentro una nota tenuta
+            r.append(f"        <offset>{scarto}</offset>")
+        if rigo:
+            r.append(f"        <staff>{rigo}</staff>")
         r.append("      </harmony>")
         return r
 

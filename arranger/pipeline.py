@@ -10,6 +10,9 @@ from typing import List, Optional
 
 from . import (analizzatore, esportatore, ia, ingestione, lilypond,
                orchestratore, vincoli)
+from .lingua import accompagnamento as nome_accompagnamento
+from .lingua import stile as nome_stile
+from .lingua import t as testo
 from .modello import Analisi, Configurazione, Partitura, Spartito, nome_it
 
 
@@ -41,8 +44,7 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
     # --- Modulo 1
     master = spartito or ingestione.ingerisci(sorgente)
     if cfg.trasporto:
-        for n in master.note:
-            n.midi += cfg.trasporto
+        trasporta(master, cfg.trasporto)
 
     # --- Modulo 3.1
     analisi = analizzatore.analizza(master)
@@ -76,13 +78,13 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
                 if cambi:
                     analisi = analizzatore.analizza_con_melodia(
                         master, analizzatore.melodia_da_scelte(master, ipotesi, nuova))
-                    note_ia.append(f"IA: melodia rivista in {cambi} misure.")
+                    note_ia.append(testo("ia_melodia", cfg.lingua, n=cambi))
 
         # 2) informazioni sul brano originale (l'API non ascolta l'audio:
         #    puo' solo cercare cio' che dell'originale e' documentato)
         riferimenti = ia.riferimenti_web(master.titolo, cfg)
         if riferimenti:
-            note_ia.append("IA: raccolte informazioni sul brano originale.")
+            note_ia.append(testo("ia_riferimenti", cfg.lingua))
 
         # 3) stile e tipo di accompagnamento
         consiglio = ia.consiglia_arrangiamento(analisi, cfg, master.titolo,
@@ -95,24 +97,25 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
                     master.bpm = float(consiglio["bpm"])
                 except (TypeError, ValueError):
                     pass
-            note_ia.append(
-                f"IA: stile consigliato {consiglio['stile']}, accompagnamento "
-                f"{consiglio.get('accompagnamento', '-')} "
-                f"({consiglio.get('motivazione', '')})")
+            note_ia.append(testo(
+                "ia_stile", cfg.lingua,
+                stile=nome_stile(consiglio["stile"], cfg.lingua),
+                acc=nome_accompagnamento(consiglio.get("accompagnamento", "-"),
+                                         cfg.lingua),
+                motivo=consiglio.get("motivazione", "")))
 
     if cfg.usa_ia and ia.disponibile():
         corr = ia.revisiona_armonia(analisi, cfg)
         if corr:
             n = ia.applica_correzioni_armonia(analisi, corr)
-            note_ia.append(f"IA: {n} accordi rivisti nella griglia armonica.")
+            note_ia.append(testo("ia_armonia", cfg.lingua, n=n))
 
     if cfg.frasi_music21:
         from . import frasi_music21
         periodi = frasi_music21.periodi_da_file(sorgente)
         if periodi:
             analisi.periodi = periodi
-            note_ia.append(f"music21: {len(periodi)} periodi individuati dal "
-                           "rilevatore avanzato di frasi.")
+            note_ia.append(testo("music21_periodi", cfg.lingua, n=len(periodi)))
 
     # --- Modulo 3.2 / 3.3
     piano = None
@@ -121,16 +124,15 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
         piano = ia.piano_orchestrazione(analisi, cfg, [p.id for p in parti_prev],
                                         master.titolo)
         if piano:
-            note_ia.append("IA: piano di staffetta della melodia generato dal modello.")
+            note_ia.append(testo("ia_staffetta", cfg.lingua))
 
     partitura = orchestratore.arrangia(master, analisi, cfg, piano_melodia=piano)
     report = vincoli.valida(partitura)
 
     if cfg.debug_originale:
         # accodato DOPO la validazione: l'originale non va filtrato
-        partitura.parti.extend(orchestratore.parti_originale(master))
-        report.append("[Debug] Spartito originale accodato in fondo alla partitura "
-                      "per il confronto.")
+        partitura.parti.extend(orchestratore.parti_originale(master, cfg.lingua))
+        report.append(testo("debug_originale", cfg.lingua))
 
     # --- Modulo 4
     base = nome_base or _slug(master.titolo)
@@ -149,7 +151,8 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
             try:
                 pdf_path = lilypond.incidi_pdf(ly_path, cartella)
             except RuntimeError as e:
-                report.append(f"[Incisione] PDF non generato: {e}")
+                report.append(testo("pdf_non_generato", cfg.lingua,
+                                    errore=e))
 
     relazione = ia.relazione_didattica(partitura, cfg)
 
@@ -158,6 +161,27 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
                      percorso_ly=ly_path, percorso_pdf=pdf_path,
                      report=report, relazione=relazione, note_ia=note_ia,
                      riferimenti=riferimenti)
+
+
+def trasporta(sp: Spartito, semitoni: int) -> None:
+    """
+    Trasporta lo spartito per intero: note, sigle e armatura.
+
+    Fino alla 0.9.1 si spostavano solo le note. Con un lead sheet il danno
+    era grave: la melodia saliva nella nuova tonalita' mentre basso e
+    accompagnamento, che nascono dalle sigle, restavano in quella di
+    partenza. In ogni caso l'armatura restava quella originale, e un brano
+    portato in Fa si scriveva senza il si bemolle in chiave.
+    """
+    for n in sp.note:
+        n.midi += semitoni
+    sp.sigle = [(t, (fond + semitoni) % 12, qualita,
+                 None if basso is None else (basso + semitoni) % 12)
+                for (t, fond, qualita, basso) in sp.sigle]
+    for m in sp.misure:
+        # sul circolo delle quinte un semitono vale sette quinte; si resta
+        # fra 6 bemolli e 5 diesis (Fa# maggiore si scrive Solb)
+        m.tonalita = (m.tonalita + 7 * semitoni + 6) % 12 - 6
 
 
 def _slug(testo: str) -> str:

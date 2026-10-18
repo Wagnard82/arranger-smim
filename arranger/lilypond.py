@@ -26,7 +26,8 @@ import shutil
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
-from .esportatore import DIV, fifths_scritti, scomponi, taglia_su_misura
+from .esportatore import (DIV, cambi_di_sigla, fifths_scritti, scomponi,
+                          sigla_scritta, taglia_su_misura)
 from .modello import Evento, Misura, Parte, Partitura
 from .strumenti import PERC_MIDI, strumento
 
@@ -157,7 +158,9 @@ class EsportatoreLilyPond:
         if parte is self.p.parti[0]:
             righe.append(f"  \\tempo 4 = {int(self.p.bpm)}")
             if self.p.swing:
-                righe.append('  \\mark \\markup { \\italic "Swing (crome in terzina)" }')
+                from .lingua import t as testo
+                righe.append('  \\mark \\markup { \\italic "'
+                             + testo("swing", self.p.lingua) + '" }')
         if misure and misure[0].anacrusi:
             righe.append(f"  \\partial {self._partial(misure[0].durata)}")
 
@@ -251,51 +254,67 @@ class EsportatoreLilyPond:
         return " ".join(fuori) + " |"
 
     def _sigle(self, parte: Parte) -> str:
-        """Riga di sigle accordali (ChordNames) ricavata dagli eventi."""
+        """
+        Riga di sigle accordali (ChordNames) dalla griglia armonica.
+
+        Si scrive misura per misura: ogni tratto si scompone in valori
+        scrivibili, la sigla va sul primo e gli altri sono spazi (la sigla
+        vale finche' non cambia). Prima si sommavano le durate anche oltre
+        la stanghetta e se ne scriveva solo il primo frammento: la riga
+        delle sigle perdeva tempo e scivolava rispetto alla musica.
+        """
         misure = self.p.misure or []
+        cambi = cambi_di_sigla(self.p.armonia)
         fuori: List[str] = []
-        corrente: Optional[str] = None
-        accumulo = 0.0
+
+        def tratto(sigla: Optional[str], durata: float) -> None:
+            frammenti = scomponi(int(round(durata * DIV)))
+            for k, (tipo, punti, _tm, _u) in enumerate(frammenti):
+                valore = _durata_ly(tipo, punti)
+                if k == 0 and sigla:
+                    fuori.append(self._sigla_ly(sigla, durata, valore))
+                else:
+                    fuori.append("s" + valore)
+
         for m in misure:
-            for e, _lp, _ld in taglia_su_misura(parte.eventi, m):
-                sigla = e.sigla if not e.pausa else None
-                if sigla == corrente:
-                    accumulo += e.durata
+            punti_m = sorted({m.inizio, m.fine}
+                             | {c[0] for c in cambi if m.inizio < c[0] < m.fine}
+                             | {c[1] for c in cambi if m.inizio < c[1] < m.fine})
+            for a, b in zip(punti_m, punti_m[1:]):
+                if b - a <= 1e-6:
                     continue
-                if corrente is not None and accumulo > 0:
-                    fuori.append(self._sigla_ly(corrente, accumulo))
-                elif accumulo > 0:
-                    fuori.append("s" + self._partial(accumulo))
-                corrente, accumulo = sigla, e.durata
-        if accumulo > 0:
-            fuori.append(self._sigla_ly(corrente, accumulo) if corrente
-                         else "s" + self._partial(accumulo))
+                attivo = next((c for c in cambi
+                               if c[0] - 1e-6 <= a < c[1] - 1e-6), None)
+                # la sigla si scrive dove l'accordo comincia, non a ogni misura
+                nuovo = attivo is not None and abs(attivo[0] - a) < 1e-6
+                tratto(sigla_scritta(attivo[2], m.tonalita) if nuovo else None,
+                       b - a)
         return "  " + " ".join(fuori)
 
-    def _sigla_ly(self, sigla: str, durata: float) -> str:
+    def _sigla_ly(self, sigla: str, durata: float,
+                  valore: Optional[str] = None) -> str:
         """'Gm7/D' -> 'sol:m7/re' in sintassi \\chordmode italiana."""
         import re
         m = re.match(r"^([A-G])([#b]?)(.*)$", sigla or "")
         if not m:
             return "s" + self._partial(durata)
-        pc = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}[m.group(1)]
-        if m.group(2) == "#":
-            pc += 1
-        elif m.group(2) == "b":
-            pc -= 1
+        # il nome si ricava lettera per lettera, cosi' la grafia (Ab o G#)
+        # resta quella della sigla, scelta secondo l'armatura
+        lettere = {"C": "do", "D": "re", "E": "mi", "F": "fa", "G": "sol",
+                   "A": "la", "B": "si"}
+        alterazioni = {"#": "d", "b": "b", "": ""}
+        radice = lettere[m.group(1)] + alterazioni[m.group(2)]
         resto = m.group(3)
         basso = None
         if "/" in resto:
             resto, b = resto.split("/", 1)
             bm = re.match(r"^([A-G])([#b]?)", b)
             if bm:
-                bp = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}[bm.group(1)]
-                bp += 1 if bm.group(2) == "#" else (-1 if bm.group(2) == "b" else 0)
-                basso = NOMI_LY[bp % 12]
+                basso = lettere[bm.group(1)] + alterazioni[bm.group(2)]
         qualita = {"": "", "m": ":m", "7": ":7", "m7": ":m7", "maj7": ":maj7",
                    "dim": ":dim", "aug": ":aug", "sus4": ":sus4", "6": ":6",
                    "m6": ":m6", "dim7": ":dim7", "m7b5": ":m7.5-"}.get(resto, "")
-        testo = NOMI_LY[pc % 12] + self._partial(durata) + qualita
+        testo = radice + (valore or self._partial(durata)) + qualita
         if basso:
             testo += "/" + basso
         return testo

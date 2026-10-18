@@ -137,10 +137,19 @@ def _classifica_parti(parti: List[ET.Element]) -> Tuple[str, Optional[int]]:
     def e_tastiera(p: dict) -> bool:
         return p["righi"] >= 2 or p["accordi"] > p["note"] * 0.25
 
-    if len(profili) == 1:
-        return ("lead_sheet", 0) if e_solista(profili[0]) else ("pianistico", None)
-    solisti = [i for i, p in enumerate(profili) if e_solista(p)]
-    tastiere = [i for i, p in enumerate(profili) if e_tastiera(p)]
+    # Le parti senza note non contano. Dorico e MuseScore esportano anche i
+    # righi lasciati vuoti: un lead sheet scritto su un modello «voce e
+    # pianoforte», con la sola melodia e le sigle e il pianoforte da
+    # riempire, arriva come DUE parti. Contando anche quella vuota il lead
+    # sheet non veniva riconosciuto: il file passava per riduzione
+    # pianistica, il basso si cercava dentro la melodia e il pianoforte
+    # suonava la melodia su entrambi i righi, sigle ignorate.
+    piene = [i for i, p in enumerate(profili) if p["note"] > 0]
+    if len(piene) == 1:
+        i = piene[0]
+        return ("lead_sheet", i) if e_solista(profili[i]) else ("pianistico", None)
+    solisti = [i for i in piene if e_solista(profili[i])]
+    tastiere = [i for i in piene if e_tastiera(profili[i])]
     if len(solisti) == 1 and tastiere and solisti[0] not in tastiere:
         return "solista_e_piano", solisti[0]
     return "pianistico", None

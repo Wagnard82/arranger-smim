@@ -10,16 +10,82 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple
 
-VERSIONE = "0.9.1"
+VERSIONE = "0.9.4"
 DATA = "ottobre 2026"
-PRECEDENTE = "0.9.0"
+DATA_EN = "October 2026"
+PRECEDENTE = "0.9.3"
 
 # Marca temporale del pacchetto: serve a capire a colpo d'occhio QUALE copia
 # del progetto sta girando, quando ne esistono piu' d'una sul disco.
-COMPILATO = "12 ottobre 2026 ore 17.40"
+COMPILATO = "17 ottobre 2026 ore 11.00"
 
 # (titolo della sezione, [voci])
 NOVITA: List[Tuple[str, List[str]]] = [
+    ("Feedback con allegati (nuovo)", [
+        "Nel modulo di feedback si puo' allegare il brano dell'ultimo "
+        "arrangiamento: insieme al file arrivano le impostazioni usate "
+        "(impostazioni.json), la partitura generata e il report, cosi' la "
+        "segnalazione si riproduce esattamente. L'opzione e' attiva di "
+        "default e si puo' togliere.",
+        "Se l'arrangiamento non riesce, la pagina non si ferma piu' "
+        "sull'errore: arriva fino al modulo di feedback, che ha gia' pronti "
+        "il file, le impostazioni e il dettaglio dell'errore (errore.txt).",
+        "Si possono aggiungere altri file: un altro spartito, un PDF con la "
+        "battuta cerchiata, uno screenshot (MusicXML, MIDI, PDF, immagini, "
+        "zip).",
+        "Limite 10 MB per file e 15 MB in tutto; i file oltre il limite non "
+        "partono e la mail lo dice. Se l'invio automatico non e' "
+        "configurato, gli allegati si scaricano in uno zip da aggiungere a "
+        "mano alla mail.",
+    ]),
+    ("Versione inglese (nuovo)", [
+        "Selettore di lingua in cima alla barra laterale: Italiano / English. "
+        "Si puo' aprire l'app direttamente in inglese aggiungendo ?lang=en "
+        "all'indirizzo.",
+        "In inglese i livelli seguono la scala dei Grade dell'editoria per "
+        "orchestre e band scolastiche: Grade 1 – Beginner (= 1a media), "
+        "Grade 2 – Elementary (= 2a), Grade 3 – Intermediate (= 3a), con un "
+        "richiamo indicativo ad ABRSM/Trinity nelle descrizioni.",
+        "La lingua cambia interfaccia, report del validatore, nomi delle "
+        "parti nel MusicXML (Flute, Violin, Cello...), nomi delle note "
+        "(C4 invece di Do4), sottotitolo e indicazioni in partitura, testi "
+        "dell'IA. La musica prodotta e' identica: verificato su tutti gli "
+        "esempi, tre livelli, due modi.",
+        "Cambiando lingua le impostazioni gia' fatte (organico, livelli, "
+        "opzioni) restano. Un arrangiamento gia' generato resta nella lingua "
+        "in cui e' stato generato fino alla generazione successiva.",
+        "Il livello si puo' indicare anche come «Grade 2» o «2» (anche da "
+        "riga di comando, che ha la nuova opzione --lingua en).",
+        "Corretto: nella scheda «Analisi dello spartito» la seconda riga di "
+        "indicatori (forma, frasi, ritornelli) compariva sotto tutte le "
+        "schede, e melodia e griglia armonica si vedevano solo nei brani con "
+        "sezioni riconosciute.",
+        "Nel report [Livelli] le parti sono indicate per nome (Violino 2) e "
+        "non piu' con la chiave interna (violino2).",
+    ]),
+    ("Sigle e mano sinistra (da un feedback)", [
+        "Lead sheet con il pianoforte vuoto: un lead sheet scritto su un "
+        "modello voce + pianoforte, con il pianoforte lasciato vuoto, non "
+        "veniva riconosciuto (due parti invece di una). Passava per "
+        "riduzione pianistica: sigle lette ma ignorate, basso cercato nella "
+        "melodia, sinistra del pianoforte che copiava il canto un'ottava "
+        "sotto. Ora le parti senza note non contano.",
+        "Sigle in partitura: pianoforte (quando il file ha le sigle) e "
+        "chitarra le riportano sopra il rigo, nel punto esatto del cambio "
+        "d'accordo, anche a meta' di una nota tenuta. Prima non uscivano "
+        "mai, nemmeno sulla chitarra che doveva averle.",
+        "Grafia delle sigle secondo l'armatura: Bb ed Eb, non A# e D#.",
+        "Mano sinistra «basso e accordo»: in un lead sheet, quando la destra "
+        "del pianoforte canta la melodia, la sinistra non suona piu' il solo "
+        "basso. 1a media: bicordo tenuto; 2a e 3a: basso sul primo movimento "
+        "e accordo sugli altri (um-pa-pa in 3/4).",
+        "Trasporto completo: ora sposta anche sigle e armatura. Prima "
+        "spostava solo le note, e in un lead sheet la melodia cambiava "
+        "tonalita' mentre basso e accompagnamento restavano in quella "
+        "d'origine.",
+        "LilyPond: la riga delle sigle non scivola piu' rispetto alla musica "
+        "quando un accordo dura un valore composto (es. minima + croma).",
+    ]),
     ("Controllo dei file all'avvio", [
         "All'avvio l'interfaccia verifica che il motore (cartella arranger/) "
         "sia della sua stessa versione. Aggiornando su GitHub solo app.py, "
@@ -265,3 +331,43 @@ NOVITA: List[Tuple[str, List[str]]] = [
 
 def riepilogo() -> Dict[str, int]:
     return {"sezioni": len(NOVITA), "voci": sum(len(v) for _t, v in NOVITA)}
+
+
+# Per l'interfaccia inglese: solo le novita' rilevanti per chi la usa da
+# fuori Italia. Lo storico completo resta in italiano qui sopra.
+NOVITA_EN: List[Tuple[str, List[str]]] = [
+    ("Feedback with attachments (new)", [
+        "The feedback form can attach the piece from the last arrangement, "
+        "together with the settings used, the generated score and the "
+        "report, so the problem can be reproduced exactly.",
+        "If an arrangement fails, the page now continues to the feedback "
+        "form, with the file and the error details ready to send.",
+        "You can add other files too: another score, a PDF with the bar "
+        "circled, a screenshot.",
+    ]),
+    ("English version (new)", [
+        "Language selector at the top of the sidebar: Italiano / English. "
+        "You can open the app directly in English by adding ?lang=en to the "
+        "address.",
+        "Levels follow the Grade scale used by school orchestra and band "
+        "publishers: Grade 1 – Beginner, Grade 2 – Elementary, Grade 3 – "
+        "Intermediate, with an approximate ABRSM/Trinity reference in the "
+        "descriptions.",
+        "The language changes the interface, the validation report, part "
+        "names in the MusicXML (Flute, Violin, Cello...), note names, the "
+        "score subtitle and markings, and AI texts. The music produced is "
+        "identical in both languages.",
+        "Levels can be set for the whole ensemble, for each instrument, or "
+        "for each single desk (e.g. Violin 2 easier than Violin 1): the "
+        "melody goes to whoever can actually play it.",
+    ]),
+    ("What the arranger does", [
+        "Input: MusicXML as a piano reduction, solo part + piano, or a lead "
+        "sheet (melody + chord symbols), recognised automatically.",
+        "Output: a full score in MusicXML ready for MuseScore, Dorico, "
+        "Sibelius or Finale, with transposing instruments, piano brace, "
+        "dynamics and chord symbols for guitar and piano.",
+        "Every part is checked against the level: range, rhythmic values, "
+        "accidentals, hand stretch, guitar positions, breathing.",
+    ]),
+]

@@ -20,6 +20,8 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 from .modello import Evento, Misura, Parte, Partitura
+from .lingua import etichetta_livello, ottave
+from .lingua import t as testo
 from .strumenti import (Livello, Strumento, livello, livello_parte,
                         nome_livello_parte, strumento)
 
@@ -111,10 +113,9 @@ def filtro_polifonia(part: Partitura) -> None:
                         _inserisci(dest, Evento(inizio=e.inizio, durata=e.durata,
                                                 altezze=[altezza],
                                                 articolazione=e.articolazione))
-                part.report.append(
-                    f"[Polifonia] {p.nome}, mis. {_misura_di(part.misure, e.inizio)}: "
-                    f"{len(e.altezze)} note su strumento monofonico -> ridotte a 1 "
-                    f"(le altre ai divisi).")
+                part.report.append(testo(
+                    "polifonia", part.lingua, parte=p.nome,
+                    mis=_misura_di(part.misure, e.inizio), n=len(e.altezze)))
                 e.altezze = [ordinate[0]]
 
 
@@ -163,11 +164,10 @@ def filtro_estensione(part: Partitura) -> None:
                 if monodico:
                     delta = ottava_migliore([e.altezze[0] for e in tratto], lo, hi)
                     if delta:
-                        part.report.append(
-                            f"[Estensione] {p.nome}, mis. "
-                            f"{_misura_di(part.misure, tratto[0].inizio)}: tratto "
-                            f"trasposto di {delta // 12:+d} ottave per rientrare "
-                            f"nell'ambito.")
+                        part.report.append(testo(
+                            "estensione_tratto", part.lingua, parte=p.nome,
+                            mis=_misura_di(part.misure, tratto[0].inizio),
+                            ott=delta // 12))
                         for e in tratto:
                             e.altezze = [e.altezze[0] + delta]
                 # residui (e accordi): correzione puntuale, ormai rara
@@ -181,10 +181,9 @@ def filtro_estensione(part: Partitura) -> None:
                             midi -= 12
                         midi = max(lo, min(hi, midi))
                         if midi != orig and not monodico:
-                            part.report.append(
-                                f"[Estensione] {p.nome}, mis. "
-                                f"{_misura_di(part.misure, e.inizio)}: nota fuori "
-                                f"ambito -> trasposta d'ottava.")
+                            part.report.append(testo(
+                                "estensione_nota", part.lingua, parte=p.nome,
+                                mis=_misura_di(part.misure, e.inizio)))
                         nuove.append(midi)
                     e.altezze = sorted(set(nuove))
 
@@ -233,9 +232,9 @@ def filtro_ritmico(part: Partitura) -> None:
                     if not e.pausa and prec.durata >= L.durata_minima:
                         # nota troppo breve: assorbita dalla precedente
                         prec.durata += e.durata
-                        part.report.append(
-                            f"[Ritmo] {p.nome}, mis. {_misura_di(part.misure, e.inizio)}: "
-                            f"valore inferiore al minimo del livello -> semplificato.")
+                        part.report.append(testo(
+                            "ritmo", part.lingua, parte=p.nome,
+                            mis=_misura_di(part.misure, e.inizio)))
                         continue
                 fusi.append(e)
             altri = [e for e in p.eventi if e.rigo != rigo]
@@ -287,11 +286,10 @@ def filtro_salti(part: Partitura) -> None:
                     if delta:
                         for e in coda:
                             e.altezze = [e.altezze[0] + delta]
-                        part.report.append(
-                            f"[Salti] {p.nome}, mis. "
-                            f"{_misura_di(part.misure, monodici[i].inizio)}: salto di "
-                            f"{salto} semitoni -> seguito della frase trasposto "
-                            f"di {delta // 12:+d} ottave.")
+                        part.report.append(testo(
+                            "salti", part.lingua, parte=p.nome,
+                            mis=_misura_di(part.misure, monodici[i].inizio),
+                            salto=salto, ott=delta // 12))
                     i += 1
 
 
@@ -342,11 +340,12 @@ def filtro_alterazioni(part: Partitura) -> None:
                 nuove.append(scelta)
                 cambiato = True
             if cambiato:
-                part.report.append(
-                    f"[Alterazioni] {p.nome}, mis. {_misura_di(part.misure, e.inizio)}: "
-                    f"nota alterata non prevista in "
-                    f"{nome_livello_parte(p.livello, part.livello)} -> "
-                    "ricondotta alla tonalita'.")
+                part.report.append(testo(
+                    "alterazioni", part.lingua, parte=p.nome,
+                    mis=_misura_di(part.misure, e.inizio),
+                    livello=etichetta_livello(
+                        nome_livello_parte(p.livello, part.livello),
+                        part.lingua, breve=True)))
             e.altezze = sorted(set(nuove))
 
 
@@ -401,10 +400,9 @@ def filtro_idiomatico(part: Partitura) -> None:
                 pos = diteggiatura_chitarra(e.altezze, L.capotasto_max)
                 if pos is None:
                     e.altezze = e.altezze[:1]
-                    part.report.append(
-                        f"[Idiomatico] {p.nome}, mis. {_misura_di(part.misure, e.inizio)}: "
-                        f"accordo non diteggiabile -> ridotto alla fondamentale "
-                        f"(resta la sigla).")
+                    part.report.append(testo(
+                        "accordo_non_diteggiabile", part.lingua, parte=p.nome,
+                        mis=_misura_di(part.misure, e.inizio)))
                 else:
                     unici = sorted(set(pos))
                     limite = L.accordi_max
@@ -427,11 +425,9 @@ def filtro_idiomatico(part: Partitura) -> None:
                         if all(lo <= e.altezze[0] + direzione <= hi for e in coda):
                             for e in coda:
                                 e.altezze = [e.altezze[0] + direzione]
-                            part.report.append(
-                                f"[Idiomatico] {p.nome}, mis. "
-                                f"{_misura_di(part.misure, monodici[i].inizio)}: cambio "
-                                f"di corda troppo ampio -> frase riportata in "
-                                f"posizione.")
+                            part.report.append(testo(
+                                "cambio_corda", part.lingua, parte=p.nome,
+                                mis=_misura_di(part.misure, monodici[i].inizio)))
 
         # ---- pianoforte: apertura della mano
         if p.strumento == "pianoforte":
@@ -441,9 +437,9 @@ def filtro_idiomatico(part: Partitura) -> None:
                 if max(e.altezze) - min(e.altezze) > L.tastiera_max_semitoni:
                     tenute = [a for a in e.altezze
                               if a - min(e.altezze) <= L.tastiera_max_semitoni]
-                    part.report.append(
-                        f"[Idiomatico] {p.nome}, mis. {_misura_di(part.misure, e.inizio)}: "
-                        f"apertura della mano eccessiva -> accordo ristretto.")
+                    part.report.append(testo(
+                        "apertura_mano", part.lingua, parte=p.nome,
+                        mis=_misura_di(part.misure, e.inizio)))
                     e.altezze = tenute or [min(e.altezze)]
                 if len(e.altezze) > L.accordi_max and e.rigo == 1:
                     e.altezze = sorted(e.altezze)[-L.accordi_max:]
@@ -480,10 +476,10 @@ def filtro_incroci(part: Partitura) -> None:
                 spostate = [a + salto for a in e.altezze]
                 if all(lo <= a <= hi for a in spostate) and min(spostate) > tetto:
                     e.altezze = spostate
-                    part.report.append(
-                        f"[Incroci] {p.nome}, mis. "
-                        f"{_misura_di(part.misure, e.inizio)}: mano destra sotto "
-                        f"la sinistra -> alzata di {salto // 12} ottava/e.")
+                    part.report.append(testo(
+                        "incrocio_destra", part.lingua, parte=p.nome,
+                        mis=_misura_di(part.misure, e.inizio),
+                        ottave=ottave(salto // 12, part.lingua)))
                     break
             else:
                 # 2) altrimenti si abbassa la sinistra (tipico quando e' la
@@ -495,11 +491,10 @@ def filtro_incroci(part: Partitura) -> None:
                             max(max(v) for v in prova.values()) < min(e.altezze):
                         for s in sotto:
                             s.altezze = prova[id(s)]
-                        part.report.append(
-                            f"[Incroci] {p.nome}, mis. "
-                            f"{_misura_di(part.misure, e.inizio)}: mano sinistra "
-                            f"abbassata di {abs(salto) // 12} ottava/e sotto la "
-                            f"melodia.")
+                        part.report.append(testo(
+                            "incrocio_sinistra", part.lingua, parte=p.nome,
+                            mis=_misura_di(part.misure, e.inizio),
+                            ottave=ottave(abs(salto) // 12, part.lingua)))
                         mossa = True
                         break
                 if not mossa:
@@ -507,10 +502,9 @@ def filtro_incroci(part: Partitura) -> None:
                     pulite = [a for a in e.altezze if a > tetto]
                     if pulite and pulite != e.altezze:
                         e.altezze = pulite
-                        part.report.append(
-                            f"[Incroci] {p.nome}, mis. "
-                            f"{_misura_di(part.misure, e.inizio)}: note raddoppiate "
-                            f"fra le due mani -> tolte dalla destra.")
+                        part.report.append(testo(
+                            "incrocio_raddoppi", part.lingua, parte=p.nome,
+                            mis=_misura_di(part.misure, e.inizio)))
 
 
 # La destra non scende sotto il SOL sotto il pentagramma in chiave di violino
@@ -541,11 +535,11 @@ def filtro_mani(part: Partitura) -> None:
                     fuori = True
                 nuove.append(max(lo, min(hi, midi)))
             if fuori:
-                part.report.append(
-                    f"[Mani] {p.nome}, mis. {_misura_di(part.misure, e.inizio)}: "
-                    f"nota fuori dal registro della mano "
-                    f"{'destra' if e.rigo == 1 else 'sinistra'} -> riportata "
-                    f"nell'ottava giusta.")
+                part.report.append(testo(
+                    "mani_registro", part.lingua, parte=p.nome,
+                    mis=_misura_di(part.misure, e.inizio),
+                    mano=testo("mano_destra" if e.rigo == 1 else "mano_sinistra",
+                               part.lingua)))
             e.altezze = sorted(set(nuove))
 
 
@@ -609,9 +603,8 @@ def _sotto_il_compagno(part: Partitura, sotto: Parte, sopra: Parte,
             e.altezze = sorted(set(max(lo, a) for a in nuove))
             corretti += 1
     if corretti:
-        part.report.append(
-            f"[Divisi] {sotto.nome}: {corretti} note che superavano "
-            f"{sopra.nome} -> riportate sotto.")
+        part.report.append(testo("divisi_sopra", part.lingua, parte=sotto.nome,
+                                 n=corretti, sopra=sopra.nome))
 
 
 def _semplifica_ritmo(part: Partitura, p: Parte, minimo: float) -> None:
@@ -637,9 +630,8 @@ def _semplifica_ritmo(part: Partitura, p: Parte, minimo: float) -> None:
         altri = [e for e in p.eventi if e.rigo != rigo]
         p.eventi = sorted(altri + fusi, key=lambda x: (x.rigo, x.inizio))
     if semplificati:
-        part.report.append(
-            f"[Divisi] {p.nome}: {semplificati} valori allargati "
-            f"(leggio secondario, parte piu' facile).")
+        part.report.append(testo("divisi_ritmo", part.lingua, parte=p.nome,
+                                 n=semplificati))
 
 
 def _stessa_misura(part: Partitura, a: Evento, b: Evento) -> bool:
@@ -733,10 +725,8 @@ def filtro_respiro(part: Partitura) -> None:
             nuovi.append(e)
         p.eventi = sorted(nuovi, key=lambda x: (x.rigo, x.inizio))
         if accorciate:
-            part.report.append(
-                f"[Respiro] {p.nome}: {accorciate} punti in cui la parte e' "
-                f"stata accorciata per far respirare "
-                f"(massimo {limite:g} quarti di fila).")
+            part.report.append(testo("respiro", part.lingua, parte=p.nome,
+                                     n=accorciate, limite=limite))
 
 
 def valida(part: Partitura) -> List[str]:

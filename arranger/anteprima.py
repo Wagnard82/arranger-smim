@@ -67,8 +67,24 @@ def _con_dichiarazione(xml: str) -> str:
 
 
 def html_anteprima(xml: str, midi: Optional[bytes] = None, zoom: float = 0.7,
-                   altezza: int = 760, misure: int = 0) -> str:
+                   altezza: int = 760, misure: int = 0,
+                   lingua: str = "it") -> str:
     """HTML completo dell'anteprima, pronto per `st.components.v1.html`."""
+    en = lingua == "en"
+    m_disegno = "Drawing the score..." if en else "Disegno la partitura..."
+    m_rete = (
+        ("Cannot load the score viewer: an internet connection is needed, and "
+         "the network must not block <code>cdn.jsdelivr.net</code> or "
+         "<code>unpkg.com</code>.<br>The arrangement is ready anyway: download "
+         "it from the <b>Download</b> tab.")
+        if en else
+        ("Non riesco a caricare il visualizzatore: serve la connessione a "
+         "internet, e la rete non deve bloccare <code>cdn.jsdelivr.net</code> "
+         "o <code>unpkg.com</code>.<br>L'arrangiamento e' comunque pronto: "
+         "scaricalo dalla scheda <b>Download</b>."))
+    m_errore = ("Cannot draw this score: " if en
+                else "Non riesco a disegnare questa partitura: ")
+    m_inizio = "Start of the document: " if en else "Inizio del documento: "
     testo = taglia_misure(xml, misure)
     xml_b64 = base64.b64encode(testo.encode("utf-8")).decode("ascii")
 
@@ -86,7 +102,7 @@ def html_anteprima(xml: str, midi: Optional[bytes] = None, zoom: float = 0.7,
 
     return f"""
 <!DOCTYPE html>
-<html lang="it">
+<html lang="{'en' if en else 'it'}">
 <head>
   <meta charset="utf-8"/>
   <style>
@@ -98,7 +114,7 @@ def html_anteprima(xml: str, midi: Optional[bytes] = None, zoom: float = 0.7,
 </head>
 <body>
   {blocco_midi}
-  <div id="stato">Disegno la partitura...</div>
+  <div id="stato">{m_disegno}</div>
   <div id="partitura"></div>
 
   <script>
@@ -123,11 +139,7 @@ def html_anteprima(xml: str, midi: Optional[bytes] = None, zoom: float = 0.7,
 
     function disegna() {{
       if (typeof opensheetmusicdisplay === "undefined") {{
-        stato.innerHTML = "Non riesco a caricare il visualizzatore: serve la "
-          + "connessione a internet, e la rete non deve bloccare "
-          + "<code>cdn.jsdelivr.net</code> o <code>unpkg.com</code>.<br>"
-          + "L'arrangiamento e' comunque pronto: scaricalo dalla scheda "
-          + "<b>Download</b>.";
+        stato.innerHTML = {m_rete!r};
         return;
       }}
       const osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay(
@@ -145,8 +157,8 @@ def html_anteprima(xml: str, midi: Optional[bytes] = None, zoom: float = 0.7,
         .then(() => {{ osmd.render(); stato.style.display = "none"; }})
         .catch((e) => {{
           const xml = decodifica("{xml_b64}");
-          stato.innerHTML = "Non riesco a disegnare questa partitura: " + e
-            + "<br><small>Inizio del documento: <code>"
+          stato.innerHTML = {m_errore!r} + e
+            + "<br><small>{m_inizio}<code>"
             + xml.slice(0, 60).replace(/</g, "&lt;") + "</code></small>";
         }});
     }}

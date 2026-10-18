@@ -1,6 +1,6 @@
 # Arranger SMIM
 
-**Versione 0.9.1.** Il registro delle modifiche vive in `arranger/versione.py`
+**Versione 0.9.4.** Il registro delle modifiche vive in `arranger/versione.py`
 (`VERSIONE`, `NOVITA`) ed e' mostrato dall'interfaccia in una colonna a destra:
 chi prova una versione nuova deve sapere che cosa e' cambiato senza andarlo a
 cercare. La stessa versione finisce nel tag `<software>` del MusicXML e nel
@@ -95,6 +95,44 @@ viene gestita nativamente).
 
 ---
 
+## Versione inglese
+
+Dalla 0.9.3 l'app e' bilingue: selettore **Italiano / English** in cima alla
+barra laterale, oppure `?lang=en` nell'indirizzo per aprirla gia' in inglese.
+Da riga di comando: `--lingua en`.
+
+La lingua cambia solo *come le cose si chiamano*: interfaccia, report del
+validatore, nomi delle parti nel MusicXML e nel LilyPond (Flute, Violin,
+Cello...), nomi delle note (C4/Do4), sottotitolo e indicazioni in partitura,
+testi dell'IA. Le scelte musicali sono identiche, e un test lo verifica.
+
+In inglese i livelli seguono la scala dei **Grade** dell'editoria per
+orchestre e band scolastiche:
+
+| Italiano | English |
+|---|---|
+| 1a Media | Grade 1 – Beginner |
+| 2a Media | Grade 2 – Elementary |
+| 3a Media | Grade 3 – Intermediate |
+
+Internamente le chiavi restano `1a Media`/`2a Media`/`3a Media`; ovunque si
+indica un livello si puo' scrivere anche `Grade 2` o `2`.
+
+Dove stanno i testi:
+
+- `arranger/lingua.py` — etichette dei livelli, nomi degli strumenti, ruoli,
+  stili, nomi delle note e catalogo dei messaggi del report (`t(chiave,
+  lingua, ...)`);
+- `arranger/testi_interfaccia.py` — tutti i testi dell'interfaccia
+  (`ui(chiave, lingua, ...)`);
+- `arranger/versione.py` — `NOVITA` (italiano, storico completo) e
+  `NOVITA_EN` (solo cio' che serve a chi usa l'app in inglese).
+
+Un messaggio nuovo del report va aggiunto al catalogo in entrambe le lingue,
+con gli stessi segnaposto: `test_cataloghi_completi` fallisce altrimenti.
+
+---
+
 ## Architettura
 
 ```
@@ -143,6 +181,13 @@ nel registro Mi2–Mi3, scegliendo ogni volta l'ottava piu' vicina alla nota
 precedente; l'accompagnamento prende il ritmo dai movimenti del metro, non
 dalla melodia, che altrimenti verrebbe raddoppiata ritmicamente sincopi
 comprese.
+
+Le parti **vuote** non contano: un lead sheet scritto su un modello voce +
+pianoforte, col pianoforte lasciato vuoto, e' sempre un lead sheet. Le sigle
+del file compaiono in partitura sopra pianoforte e chitarra, con la grafia
+dell'armatura (Bb, non A#), e seguono il trasporto. Quando e' il pianoforte a
+cantare la melodia, la sinistra suona **basso e accordo**: bicordo tenuto in
+1a media, basso sul primo movimento e accordo sugli altri in 2a e 3a.
 
 Senza le sigle, l'armonia viene **proposta**: un accordo per misura fra i gradi
 principali della tonalita' (I, IV, V, V7, vi, ii, iii), scelto per le note
@@ -670,6 +715,19 @@ Il repository e' gia' pronto: `requirements.txt` con la sola dipendenza
 via SMTP leggendo le credenziali da `st.secrets["email"]`; se mancano, l'app
 non va in errore ma offre un link `mailto`. Vedi
 `.streamlit/secrets.toml.esempio` per le chiavi attese.
+
+Dalla 0.9.4 la mail puo' portare allegati (`arranger/feedback.py`): il brano
+dell'ultimo arrangiamento, `impostazioni.json` con la configurazione usata,
+la partitura generata, `report.txt` e, se la generazione e' fallita,
+`errore.txt`, piu' i file scelti dall'utente. Limite 10 MB per file, 15 MB in
+tutto. Per rifare l'arrangiamento segnalato basta ricaricare le impostazioni:
+
+```python
+import json
+from arranger import Configurazione, esegui
+cfg = Configurazione(**json.load(open("impostazioni.json", encoding="utf-8")))
+esegui("brano_segnalato.musicxml", cfg, cartella="prova")
+```
 
 ## Limiti noti / possibili estensioni
 

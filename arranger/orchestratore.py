@@ -18,6 +18,10 @@ from .modello import (Accordo, Analisi, Configurazione, Evento, Misura, Nota,
 from .distribuzione import assegna as assegna_ruoli_stabili
 from .distribuzione import (copertura, migliore_per_frase, solista_per_registro,
                             solisti_ordinati)
+from .lingua import abbrev_strumento, etichetta_livello, nome_parte_da_id
+from .lingua import nota as nome_nota
+from .lingua import stile as nome_stile
+from .lingua import t as testo
 from .strumenti import (ORDINE_PARTITURA, PERC_MIDI, Strumento, livello,
                         nomi_parti, strumento)
 
@@ -86,7 +90,7 @@ def _accordo_a(armonia: List[Accordo], t: float) -> Optional[Accordo]:
 # --------------------------------------------------------------------------
 
 
-def parti_originale(sp: Spartito) -> List[Parte]:
+def parti_originale(sp: Spartito, lingua: str = "it") -> List[Parte]:
     """
     MODALITA' CONFRONTO: ricostruisce lo spartito di partenza come parte in
     fondo alla partitura, cosi' da poterlo leggere sotto l'arrangiamento e
@@ -95,7 +99,8 @@ def parti_originale(sp: Spartito) -> List[Parte]:
     Non passa dai filtri di validazione: e' il testo originale, va lasciato
     esattamente com'e'.
     """
-    parte = Parte(id="originale", nome="Originale (confronto)", abbrev="Orig.",
+    parte = Parte(id="originale", nome=testo("originale_confronto", lingua),
+                  abbrev="Orig.",
                   strumento="pianoforte", chiave="G", trasposizione=0,
                   monofonico=False, programma_midi=0, righi=2, ruolo="confronto")
     fine = sp.durata_totale
@@ -129,7 +134,7 @@ def costruisci_parti(cfg: Configurazione) -> List[Parte]:
         if n <= 0:
             continue
         st = strumento(chiave)
-        for i, nome in enumerate(nomi_parti(chiave, n)):
+        for i, nome in enumerate(nomi_parti(chiave, n, cfg.lingua)):
             id_parte = f"{chiave}{i + 1}"
             # L'id della parte vince sullo strumento: se il professore ha
             # detto qualcosa del secondo leggio di violino, quella
@@ -139,7 +144,8 @@ def costruisci_parti(cfg: Configurazione) -> List[Parte]:
                               or cfg.livelli_strumenti.get(chiave))
             parti.append(Parte(
                 id=id_parte, nome=nome,
-                abbrev=st.abbrev + (f" {i + 1}" if n > 1 else ""),
+                abbrev=(abbrev_strumento(chiave, cfg.lingua)
+                        + (f" {i + 1}" if n > 1 else "")),
                 strumento=chiave, chiave=st.chiave_musicale,
                 ottava_chiave=st.ottava_chiave, trasposizione=st.trasposizione,
                 monofonico=st.monofonico, programma_midi=st.programma_midi,
@@ -756,6 +762,97 @@ def basso_sostenuto(analisi: Analisi, st: Strumento, liv: str,
     return _fondi_uguali(leviga_ottave(ev, lo, hi))
 
 
+def _note_sopra_il_basso(acc: Accordo, basso_pc: int, quante: int) -> List[int]:
+    """
+    Le classi d'altezza da mettere sopra il basso, in ordine d'importanza:
+    terza e settima prima (dicono che accordo e'), poi quinta e fondamentale.
+    Con due sole note un accordo di settima resta riconoscibile: terza e
+    settima, come insegna qualsiasi manuale d'accompagnamento.
+    """
+    pcs = acc.note_accordo()
+    radice = acc.fondamentale
+    ordine = []
+    for intervallo in (3, 4, 10, 11, 9, 7, 6, 8, 5, 0):
+        pc = (radice + intervallo) % 12
+        if pc in pcs and pc not in ordine:
+            ordine.append(pc)
+    for pc in pcs:
+        if pc not in ordine:
+            ordine.append(pc)
+    scelte = [pc for pc in ordine if pc != basso_pc] or ordine
+    return scelte[:quante]
+
+
+def sinistra_basso_accordo(analisi: Analisi, st: Strumento, liv: str,
+                           misure: List[Misura]) -> List[Evento]:
+    """
+    Mano sinistra di un lead sheet quando la destra canta la melodia:
+    basso e accordo. Senza, la sinistra ha solo il basso, una nota per
+    accordo, e l'armonia scritta nelle sigle al pianoforte non si sente.
+
+    1a media: basso piu' una nota dell'accordo, tenuti (bicordo, mano
+    ferma). 2a e 3a: basso sul primo movimento e accordo sugli altri, il
+    classico «um-pa»: um-pa-pa in 3/4, basso-accordo-basso-accordo in 4/4,
+    basso e accordo nei tempi composti. Ogni cambio di sigla riparte dal
+    basso. L'accordo sta sotto il si3 e sotto la melodia: dove la melodia
+    scende troppo, la sinistra tiene il solo basso.
+    """
+    L = livello(liv)
+    semplice = L.accordi_max <= 2
+    # note sopra il basso: una in 1a (bicordo), due in 2a, tre in 3a
+    quante = 1 if semplice else (2 if L.accordi_max <= 3 else 3)
+    ev: List[Evento] = []
+    for acc in analisi.armonia:
+        if acc.durata <= 1e-6:
+            continue
+        # il basso e' quello gia' calcolato dalle sigle (rivolti compresi)
+        dal_basso = [n for n in analisi.basso
+                     if acc.inizio - 1e-6 <= n.inizio < acc.fine - 1e-6]
+        basso_pc = acc.basso if acc.basso is not None else acc.fondamentale
+        basso = (dal_basso[0].midi if dal_basso
+                 else nota_in_ambito(basso_pc + 36, 40, 52))
+        # tetto dell'accordo: sotto il si3 e sotto la nota piu' grave della
+        # melodia in quel tratto
+        canto = [n.midi for n in analisi.melodia
+                 if n.inizio < acc.fine - 1e-6 and n.fine > acc.inizio + 1e-6]
+        tetto = min([59] + [x - 1 for x in canto])
+        sopra: List[int] = []
+        for pc in _note_sopra_il_basso(acc, basso_pc, quante):
+            candidati = [o * 12 + pc for o in range(3, 6)
+                         if basso < o * 12 + pc <= tetto
+                         and o * 12 + pc - basso <= L.tastiera_max_semitoni + (
+                             0 if semplice else 12)]
+            if candidati:
+                rif = sopra[-1] if sopra else tetto
+                sopra.append(min(candidati, key=lambda c: abs(c - rif)))
+        sopra = sorted(set(sopra))
+        if not semplice and sopra and max(sopra) - min(sopra) > L.tastiera_max_semitoni:
+            sopra = sopra[1:]
+        if semplice:
+            ev.append(Evento(inizio=acc.inizio, durata=acc.durata,
+                             altezze=sorted({basso, *sopra}), sigla=acc.sigla()))
+            continue
+        m = next((x for x in misure
+                  if x.inizio - 1e-6 <= acc.inizio < x.fine - 1e-6), None)
+        passo = m.unita_movimento if m is not None else 1.0
+        t, k = acc.inizio, 0
+        while t < acc.fine - 1e-6:
+            d = min(passo, acc.fine - t)
+            # in 4/4 il basso torna sul terzo movimento; in 3/4 e nei
+            # composti solo sul primo
+            movimenti = round(m.durata / passo) if m is not None else 4
+            sul_basso = k == 0 or (movimenti == 4 and k % 2 == 0)
+            if sul_basso or not sopra:
+                ev.append(Evento(inizio=t, durata=d, altezze=[basso],
+                                 sigla=acc.sigla()))
+            else:
+                ev.append(Evento(inizio=t, durata=d, altezze=list(sopra),
+                                 sigla=acc.sigla()))
+            t += d
+            k += 1
+    return ev
+
+
 def walking_bass(analisi: Analisi, st: Strumento, liv: str,
                  misure: List[Misura]) -> List[Evento]:
     """Walking bass semplificato: fondamentale - quinta - fondamentale - grado di passaggio."""
@@ -1013,7 +1110,7 @@ def orchestra_tessitura(sp: Spartito, analisi: Analisi, parti: List[Parte],
                                           mantieni_ottave=True),
                     inizio, fine, rigo))
             p.ruolo = "tessitura"
-            resoconto.append(f"[Tessitura] {p.nome}: parte pianistica originale.")
+            resoconto.append(testo("tessitura_piano", cfg.lingua, parte=p.nome))
             continue
 
         note = [x for x in sp.note if basso <= x.midi <= alto]
@@ -1030,8 +1127,9 @@ def orchestra_tessitura(sp: Spartito, analisi: Analisi, parti: List[Parte],
         p.ruolo = "tessitura"
         if p.strumento == "chitarra":
             p.mostra_sigle = True
-        resoconto.append(
-            f"[Tessitura] {p.nome}: fascia {nome_it(basso)}-{nome_it(alto)}.")
+        resoconto.append(testo("tessitura_fascia", cfg.lingua, parte=p.nome,
+                               da=nome_nota(basso, cfg.lingua),
+                               a=nome_nota(alto, cfg.lingua)))
 
     for p in parti:
         if strumento(p.strumento).percussione:
@@ -1087,46 +1185,41 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
     part = Partitura(titolo=sp.titolo, compositore=sp.compositore, misure=misure,
                      bpm=sp.bpm, stile=cfg.stile, livello=cfg.livello,
                      swing=(cfg.stile == "Jazz"), parti=parti,
-                     armonia=list(analisi.armonia))
-    part.sottotitolo = (f"Arrangiamento per orchestra scolastica - "
-                        f"{cfg.livello} - stile {cfg.stile}")
+                     armonia=list(analisi.armonia), lingua=cfg.lingua)
+    lingua = cfg.lingua
+    part.sottotitolo = testo("sottotitolo", lingua,
+                             livello=etichetta_livello(cfg.livello, lingua, breve=True),
+                             stile=nome_stile(cfg.stile, lingua))
+    if sp.sigle:
+        # Le sigle SCRITTE nel file sono un dato certo: chi suona il
+        # pianoforte le deve trovare in partitura, come in ogni lead sheet.
+        # Quelle dedotte dall'analisi restano solo sulla chitarra, che le ha
+        # sempre avute: sul pianoforte, scritte accanto a una parte che
+        # potrebbe dire altro, confonderebbero.
+        for p in parti:
+            if p.strumento == "pianoforte":
+                p.mostra_sigle = True
     if sp.tipo == "lead_sheet":
         if sp.sigle:
-            part.report.append(
-                f"[Ingresso] lead sheet riconosciuto: la melodia e' quella "
-                f"scritta, basso e accompagnamento sono costruiti dalle "
-                f"{len(sp.sigle)} sigle del file. Il basso suona la "
-                "fondamentale di ogni accordo (o la nota dopo la barra, nei "
-                "rivolti come C/E).")
+            part.report.append(testo("ingresso_lead_sheet", lingua,
+                                     n=len(sp.sigle)))
         else:
-            part.report.append(
-                "[Ingresso] lead sheet SENZA SIGLE: l'armonia e' stata "
-                "proposta dall'arrangiatore, un accordo per misura sui gradi "
-                "principali della tonalita'. E' un'armonizzazione plausibile "
-                "della melodia, non necessariamente quella del brano: dalla "
-                "sola melodia non si puo' ricostruire. Per un arrangiamento "
-                "fedele aggiungi le sigle nel file (in Dorico, MuseScore o "
-                "Sibelius) e rigenera.")
+            part.report.append(testo("ingresso_lead_sheet_senza_sigle", lingua))
     elif sp.tipo == "solista_e_piano":
-        part.report.append(
-            "[Ingresso] parte solista + pianoforte riconosciuta: la melodia "
-            "e' la parte del solista, l'accompagnamento quello del "
-            "pianoforte.")
+        part.report.append(testo("ingresso_solista", lingua))
     if cfg.livelli_strumenti:
         # Va scritto sulla partitura, non solo nel report: chi la prende in
         # mano fra sei mesi deve sapere che alcune parti sono state calibrate
         # su un livello diverso, o le leggera' come errori di scrittura.
-        part.sottotitolo += " (livelli differenziati)"
-        part.report.append(
-            "[Livelli] classe impostata su " + cfg.livello + "; indicazioni "
-            "specifiche: "
-            + ", ".join(f"{chiave} = {valore}"
-                        for chiave, valore in sorted(
-                            cfg.livelli_strumenti.items()))
-            + ". Le parti coinvolte sono state calibrate su quel livello per "
-            "estensione, valori ritmici, alterazioni e respiro, e sono state "
-            "valutate su quel livello anche nella scelta di chi porta la "
-            "melodia.")
+        part.sottotitolo += testo("sottotitolo_differenziati", lingua)
+        elenco = ", ".join(
+            f"{nome_parte_da_id(chiave, lingua)} = "
+            f"{etichetta_livello(valore, lingua, breve=True)}"
+            for chiave, valore in sorted(cfg.livelli_strumenti.items()))
+        part.report.append(testo(
+            "livelli", lingua,
+            livello=etichetta_livello(cfg.livello, lingua, breve=True),
+            elenco=elenco))
 
     tessitura = (cfg.modo == "tessitura"
                  or (cfg.modo == "auto" and not analisi.melodia_affidabile))
@@ -1134,9 +1227,7 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
         part.report.extend(orchestra_tessitura(sp, analisi, parti, cfg, misure))
         for p in parti:
             applica_dinamiche(p, sp.dinamiche, sp.gradazioni)
-        part.report.append(
-            "[Tessitura] Brano orchestrato per registri: non e' stata cercata "
-            "una melodia da affidare a un solista.")
+        part.report.append(testo("tessitura_brano", lingua))
         return part
 
     for p in parti:
@@ -1298,6 +1389,10 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
             sinistra_originale = [n for n in sp.note if n.rigo == 2]
             if cfg.stile == "Jazz":
                 sinistra = walking_bass(tutto, st, liv_p, misure)
+            elif sp.tipo == "lead_sheet" and p.ruolo == "melodia":
+                # la destra canta: l'armonia delle sigle la deve dare la
+                # sinistra, non basta il basso
+                sinistra = sinistra_basso_accordo(tutto, st, liv_p, misure)
             elif usa_figurazione and p.variante % 2 == 0 and sinistra_originale:
                 # la mano sinistra dell'originale e' gia' la parte giusta:
                 # arpeggi e figure ritmiche vanno conservati, non appiattiti
@@ -1348,7 +1443,8 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
         materiale = sorted(residuo + analisi.frammenti,
                            key=lambda seg: seg[0].inizio)
         part.report.extend(distribuisci_frammenti(parti, materiale,
-                                                  cfg.livello, misure))
+                                                  cfg.livello, misure,
+                                                  lingua=cfg.lingua))
 
     part.report.extend(alleggerisci_per_solista(part, analisi))
     part.report.extend(riempi_silenzi_lunghi(part, analisi, cfg, misure))
@@ -1462,9 +1558,8 @@ def riempi_silenzi_lunghi(part: Partitura, analisi: Analisi,
                 if eventi and _sostituisci_span(p, eventi):
                     riempiti += 1
         if riempiti:
-            note_report.append(
-                f"[Silenzi] {p.nome}: {riempiti} pause lunghe riempite con "
-                f"l'accompagnamento.")
+            note_report.append(testo("silenzi", cfg.lingua, parte=p.nome,
+                                     n=riempiti))
     return note_report
 
 
@@ -1540,9 +1635,8 @@ def alleggerisci_per_solista(part: Partitura, analisi: Analisi) -> List[str]:
                 if p is solista or p.ruolo == "melodia":
                     continue      # gli altri solisti raddoppiano: e' voluto
                 _dirada_parte(p, a, b, attacchi_melodia)
-        note_report.append(
-            f"[Solista] {solista.nome}: accompagnamento alleggerito nei tratti "
-            f"in cui porta la melodia ({len(tratti)} tratti).")
+        note_report.append(testo("solista_alleggerito", part.lingua,
+                                 parte=solista.nome, n=len(tratti)))
     return note_report
 
 
@@ -1595,7 +1689,8 @@ def _dirada_parte(p: Parte, a: float, b: float,
 
 
 def distribuisci_frammenti(parti: List[Parte], frammenti: List[List[Nota]],
-                           liv: str, misure: List[Misura]) -> List[str]:
+                           liv: str, misure: List[Misura],
+                           lingua: str = "it") -> List[str]:
     """
     Affida gli incisi rimasti (scale, volatine, riempimenti) agli strumenti
     che in quel punto tacciono. A rotazione, cosi' che il materiale si
@@ -1641,11 +1736,9 @@ def distribuisci_frammenti(parti: List[Parte], frammenti: List[List[Nota]],
                          altezze=[n.midi + scarto], letterale=True)
                   for n in frammento]
         if _sostituisci_span(p, eventi):
-            note_report.append(
-                f"[Incisi] {p.nome}, mis. {_numero_misura(misure, a)}: inciso "
-                f"dell'originale ripreso"
-                + ("" if priorita == "tace" else " al posto del riempimento")
-                + ".")
+            note_report.append(testo(
+                "inciso" if priorita == "tace" else "inciso_al_posto", lingua,
+                parte=p.nome, mis=_numero_misura(misure, a)))
     return note_report
 
 

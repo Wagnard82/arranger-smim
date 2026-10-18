@@ -6,6 +6,10 @@ Esempi:
         --organico flauto=2,violino=2,violoncello=1,chitarra=1,pianoforte=1 \
         --livello "1a Media" --stile Normale -o output
 
+    # versione inglese: livelli come Grade 1/2/3, parti e report in inglese
+    python cli.py esempi/lead_sheet.xml --organico flauto=1,violino=2 \
+        --livello "Grade 2" --livello-strumento violino2=1 --lingua en
+
     python cli.py "https://youtu.be/XXXX" --organico flauto=1,chitarra=1 --ia
 """
 
@@ -15,7 +19,18 @@ import argparse
 import sys
 
 from arranger import Configurazione, esegui
+from arranger.lingua import LINGUE, normalizza_livello
 from arranger.strumenti import LIVELLI, REGISTRO
+
+
+def livello_cli(testo: str) -> str:
+    """Accetta "1a Media", "Grade 1", "1"... e restituisce la chiave interna."""
+    chiave = normalizza_livello(testo)
+    if chiave not in LIVELLI:
+        raise argparse.ArgumentTypeError(
+            f"livello non riconosciuto: {testo}. Ammessi: "
+            f"{', '.join(LIVELLI)} oppure Grade 1, Grade 2, Grade 3")
+    return chiave
 
 
 def organico(testo: str) -> dict:
@@ -41,7 +56,12 @@ def main(argv=None) -> int:
                          "sigle degli accordi)")
     ap.add_argument("--organico", type=organico, required=True,
                     help="es. flauto=2,violino=2,violoncello=1,chitarra=1")
-    ap.add_argument("--livello", choices=list(LIVELLI), default="1a Media")
+    ap.add_argument("--livello", type=livello_cli, default="1a Media",
+                    help="1a Media / 2a Media / 3a Media, oppure "
+                         "Grade 1 / Grade 2 / Grade 3, oppure 1 / 2 / 3")
+    ap.add_argument("--lingua", choices=list(LINGUE), default="it",
+                    help="lingua di report, nomi delle parti e didascalie "
+                         "(it, en); la musica non cambia")
     ap.add_argument("--livello-strumento", action="append", default=[],
                     metavar="CHIAVE=LIVELLO", dest="livello_strumento",
                     help="livello di un singolo strumento o leggio, "
@@ -92,10 +112,10 @@ def main(argv=None) -> int:
             ap.error(f"--livello-strumento vuole CHIAVE=LIVELLO, ricevuto: {voce}")
         chiave, _, valore = voce.partition("=")
         chiave, valore = chiave.strip(), valore.strip()
-        if valore not in LIVELLI:
-            ap.error(f"livello non riconosciuto: {valore}. "
-                     f"Ammessi: {', '.join(LIVELLI)}")
-        livelli_strumenti[chiave] = valore
+        try:
+            livelli_strumenti[chiave] = livello_cli(valore)
+        except argparse.ArgumentTypeError as e:
+            ap.error(str(e))
 
     cfg = Configurazione(formazione=a.organico, livello=a.livello, stile=a.stile,
                          livelli_strumenti=livelli_strumenti,
@@ -106,7 +126,7 @@ def main(argv=None) -> int:
                          silenzio_massimo_misure=max(1, a.pausa_massima),
                          misure_minime_solista=a.misure_minime_solista,
                          debug_originale=a.confronto, usa_ia=a.ia,
-                         modello_ia=a.modello_ia)
+                         modello_ia=a.modello_ia, lingua=a.lingua)
     scelte = {x.strip() for x in a.ia_funzioni.split(",") if x.strip()}
     for funzione in ("melodia", "riferimenti", "stile", "orchestrazione",
                      "armonia", "relazione"):

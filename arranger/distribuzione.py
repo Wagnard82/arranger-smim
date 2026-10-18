@@ -132,6 +132,9 @@ def assegna(parti: List[Parte], analisi: Analisi, cfg: Configurazione,
     basso (senza fondamenta non sta in piedi niente), poi le seconde voci, poi
     l'armonia. Le percussioni fanno ritmo e basta.
     """
+    from .lingua import etichetta_livello
+    from .lingua import t as testo
+    lingua = cfg.lingua
     resoconto: List[str] = []
     liberi = [p for p in parti if not strumento(p.strumento).percussione]
     for p in parti:
@@ -146,7 +149,7 @@ def assegna(parti: List[Parte], analisi: Analisi, cfg: Configurazione,
     if cfg.strumenti_melodia:
         solisti = [p for p in liberi if p.id in cfg.strumenti_melodia]
         for p in solisti:
-            resoconto.append(f"[Ruoli] {p.nome}: melodia (scelta dell'utente).")
+            resoconto.append(testo("ruolo_melodia_utente", lingua, parte=p.nome))
     else:
         # si tiene da parte chi servira' per basso e seconde voci
         riserve = (1 if basso else 0) + (1 if voci else 0)
@@ -165,11 +168,11 @@ def assegna(parti: List[Parte], analisi: Analisi, cfg: Configurazione,
         for p in solisti:
             liv = p.livello or cfg.livello
             dentro, _ = copertura(strumento(p.strumento), melodia, liv)
-            resoconto.append(
-                f"[Ruoli] {p.nome}: melodia "
-                f"(livello {liv}, "
-                f"idoneita' {idoneita(p, 'melodia', melodia, liv, tonalita):.2f}, "
-                f"{dentro * 100:.0f}% delle note in estensione).")
+            resoconto.append(testo(
+                "ruolo_melodia", lingua, parte=p.nome,
+                livello=etichetta_livello(liv, lingua, breve=True),
+                idoneita=idoneita(p, 'melodia', melodia, liv, tonalita),
+                perc=dentro * 100))
     for p in solisti:
         p.ruolo = "melodia"
     liberi = [p for p in liberi if p not in solisti]
@@ -183,7 +186,7 @@ def assegna(parti: List[Parte], analisi: Analisi, cfg: Configurazione,
                     migliore.livello or cfg.livello, tonalita) > 0:
             migliore.ruolo = "basso"
             liberi.remove(migliore)
-            resoconto.append(f"[Ruoli] {migliore.nome}: basso.")
+            resoconto.append(testo("ruolo_basso", lingua, parte=migliore.nome))
 
     # ------------------------------------------------------------ seconde voci
     # pianoforte e chitarra restano fuori: sono gli accompagnatori naturali, e
@@ -201,15 +204,15 @@ def assegna(parti: List[Parte], analisi: Analisi, cfg: Configurazione,
             break
         migliore.ruolo = "controcanto"
         liberi.remove(migliore)
-        resoconto.append(f"[Ruoli] {migliore.nome}: seconda voce / controcanto.")
+        resoconto.append(testo("ruolo_controcanto_voce", lingua,
+                               parte=migliore.nome))
 
     # ---------------------------------------------------------------- armonia
     for p in liberi:
         p.ruolo = "armonia" if TIMBRO["armonia"].get(p.strumento, 0) >= 0.5 \
             else "controcanto"
-        resoconto.append(f"[Ruoli] {p.nome}: "
-                         + ("accompagnamento armonico." if p.ruolo == "armonia"
-                            else "controcanto."))
+        resoconto.append(testo("ruolo_armonia" if p.ruolo == "armonia"
+                               else "ruolo_controcanto", lingua, parte=p.nome))
 
     # se nessuno accompagna, il candidato migliore fra i non solisti passa
     # all'armonia: una partitura di sole melodie non regge
@@ -221,8 +224,8 @@ def assegna(parti: List[Parte], analisi: Analisi, cfg: Configurazione,
             scelto = max(non_solisti,
                          key=lambda p: TIMBRO["armonia"].get(p.strumento, 0))
             scelto.ruolo = "armonia"
-            resoconto.append(f"[Ruoli] {scelto.nome}: accompagnamento "
-                             "(nessuno altrimenti accompagnerebbe).")
+            resoconto.append(testo("ruolo_accompagnamento_forzato", lingua,
+                                   parte=scelto.nome))
     return resoconto
 
 

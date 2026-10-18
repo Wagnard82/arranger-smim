@@ -59,6 +59,50 @@ FUNZIONI = {
 }
 
 
+# Le stesse voci per l'interfaccia inglese (chiavi identiche).
+MODELLI_EN = {
+    "Sonnet (balanced)": "claude-sonnet-4-6",
+    "Haiku (fast and cheap)": "claude-haiku-4-5-20251001",
+    "Opus (most accurate)": "claude-opus-4-1",
+}
+
+FUNZIONI_EN = {
+    "melodia": ("Melody arbitration",
+                "Sends the model, bar by bar, the lines that could be the "
+                "melody. This is where the rules go wrong most often: a melody "
+                "moving between the hands, doubled voices."),
+    "stile": ("Style and accompaniment",
+              "Asks for style, accompaniment type, density and tempo. With "
+              "the style set to 'Automatic' the suggestion is applied."),
+    "riferimenti": ("Research on the original song",
+                    "Searches the web for genre, tempo, instrumentation and "
+                    "structure of the best-known version, and passes them to "
+                    "the previous function. Slower: it needs a search."),
+    "orchestrazione": ("Melody hand-off",
+                       "Lets the model decide which instrument sings each "
+                       "phrase and where the climaxes go."),
+    "armonia": ("Chord symbol review",
+                "Reviews the chords recognised with low confidence, following "
+                "tonal logic."),
+    "relazione": ("Report for the teacher",
+                  "Summarises the validator's interventions: what was "
+                  "simplified and where to check by hand."),
+}
+
+
+def modelli(lingua: str = "it") -> Dict[str, str]:
+    return MODELLI_EN if lingua == "en" else MODELLI
+
+
+def funzioni(lingua: str = "it") -> Dict[str, Tuple[str, str]]:
+    return FUNZIONI_EN if lingua == "en" else FUNZIONI
+
+
+def _lingua_risposta(cfg: Configurazione) -> str:
+    """Istruzione sulla lingua dei testi che arrivano al docente."""
+    return "English" if getattr(cfg, "lingua", "it") == "en" else "italiano"
+
+
 def configura_chiave(chiave: Optional[str]) -> bool:
     """Imposta la chiave API per questa sessione. Ritorna True se ora c'e'."""
     if chiave:
@@ -80,12 +124,16 @@ def stato() -> Dict[str, bool]:
             "chiave": bool(os.environ.get("ANTHROPIC_API_KEY"))}
 
 
-def prova_connessione(modello: str = MODELLO_DEFAULT) -> Tuple[bool, str]:
+def prova_connessione(modello: str = MODELLO_DEFAULT,
+                      lingua: str = "it") -> Tuple[bool, str]:
     """Chiamata minima di verifica: conferma che chiave e modello funzionano."""
+    en = lingua == "en"
     if not libreria_presente():
-        return False, "Manca il pacchetto anthropic (pip install anthropic)."
+        return False, ("The anthropic package is missing (pip install anthropic)."
+                       if en else
+                       "Manca il pacchetto anthropic (pip install anthropic).")
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        return False, "Manca la chiave API."
+        return False, "The API key is missing." if en else "Manca la chiave API."
     try:
         import anthropic
         client = anthropic.Anthropic()
@@ -94,9 +142,11 @@ def prova_connessione(modello: str = MODELLO_DEFAULT) -> Tuple[bool, str]:
             messages=[{"role": "user", "content": "Rispondi solo: ok"}])
         testo = "".join(b.text for b in risp.content
                         if getattr(b, "type", "") == "text")
-        return True, f"Connessione riuscita ({modello}): {testo.strip()[:20]}"
+        return True, (f"Connection OK ({modello}): " if en else
+                      f"Connessione riuscita ({modello}): ") + testo.strip()[:20]
     except Exception as e:
-        return False, f"Connessione fallita: {e}"
+        return False, (f"Connection failed: {e}" if en
+                       else f"Connessione fallita: {e}")
 
 
 def disponibile() -> bool:
@@ -219,7 +269,10 @@ def consiglia_arrangiamento(analisi: Analisi, cfg: Configurazione,
         'Rispondi: {"stile": "Normale|Cinematico|Jazz", '
         '"accompagnamento": "blocchi|arpeggio|ribattuto|pad|walking", '
         '"densita": "rada|media|piena", "bpm": 90, '
-        '"motivazione": "una frase"}')
+        '"motivazione": "una frase"}\n'
+        f"Scrivi la motivazione in {_lingua_risposta(cfg)}; le altre chiavi "
+        "e i valori di stile, accompagnamento e densita' restano come "
+        "indicato.")
     dati = _json(_chiama(prompt, sistema, cfg.modello_ia, max_token=600))
     if not dati or "stile" not in dati:
         return None
@@ -244,8 +297,8 @@ def riferimenti_web(titolo: str, cfg: Configurazione) -> Optional[str]:
         client = anthropic.Anthropic()
         risp = client.messages.create(
             model=cfg.modello_ia, max_tokens=800,
-            system=("Rispondi in italiano, in modo sintetico e fattuale. "
-                    "Se non trovi il brano, dillo in una riga."),
+            system=(f"Rispondi in {_lingua_risposta(cfg)}, in modo sintetico "
+                    "e fattuale. Se non trovi il brano, dillo in una riga."),
             tools=[{"type": "web_search_20250305", "name": "web_search"}],
             messages=[{"role": "user", "content":
                        f"Cerca informazioni sul brano '{titolo}': genere, "
@@ -324,7 +377,8 @@ def relazione_didattica(part: Partitura, cfg: Configurazione) -> Optional[str]:
     if not cfg.ia_attiva("relazione") or not disponibile() or not part.report:
         return None
     sistema = ("Sei un docente di strumento musicale nella scuola secondaria di primo "
-               "grado. Scrivi in italiano, in modo pratico e sintetico.")
+               f"grado. Scrivi in {_lingua_risposta(cfg)}, in modo pratico e "
+               "sintetico.")
     prompt = (
         f"Arrangiamento di '{part.titolo}' per {cfg.livello}, stile {cfg.stile}.\n"
         f"Il validatore automatico ha registrato questi interventi:\n"

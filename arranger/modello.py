@@ -288,6 +288,7 @@ class Partitura:
     swing: bool = False
     armonia: List["Accordo"] = field(default_factory=list)
     report: List[str] = field(default_factory=list)   # log dei filtri di validazione
+    lingua: str = "it"               # lingua di report, nomi e didascalie
 
     def parte(self, id_: str) -> Optional[Parte]:
         for p in self.parti:
@@ -345,6 +346,20 @@ class Configurazione:
     ia_orchestrazione: bool = False  # staffetta della melodia frase per frase
     ia_armonia: bool = False         # revisione delle sigle poco affidabili
     ia_relazione: bool = False       # relazione didattica per il docente
+    lingua: str = "it"
+    # "it" o "en": cambia SOLO come le cose si chiamano (nomi delle parti,
+    # report, didascalie della partitura, testi dell'IA). Le scelte musicali
+    # sono identiche nelle due lingue.
+
+    def __post_init__(self) -> None:
+        # Il livello si puo' scrivere anche all'inglese ("Grade 2", "2"):
+        # qui si riporta alla chiave interna, cosi' il resto del motore
+        # continua a ragionare su "1a Media"/"2a Media"/"3a Media".
+        from .lingua import normalizza_livello, valida
+        self.livello = normalizza_livello(self.livello)
+        self.livelli_strumenti = {k: normalizza_livello(v)
+                                  for k, v in self.livelli_strumenti.items()}
+        self.lingua = valida(self.lingua)
 
     def ia_attiva(self, funzione: str) -> bool:
         return self.usa_ia and bool(getattr(self, f"ia_{funzione}", False))
