@@ -113,7 +113,7 @@ class EsportatoreLilyPond:
                 f'  title = "{titolo}"\n'
                 f'  subtitle = "{sotto}"\n'
                 f'  composer = "{comp}"\n'
-                f'  arranger = "Arranger SMIM {_versione()}"\n'
+                f'  arranger = "ScoreCraft Edu {_versione()}"\n'
                 '  tagline = ##f\n'
                 "}\n\n"
                 "\\paper {\n"

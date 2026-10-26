@@ -15,9 +15,11 @@ from typing import Dict, List, Optional, Tuple
 
 from .modello import (Accordo, Analisi, Configurazione, Evento, Misura, Nota,
                       Parte, Partitura, Spartito, nome_it)
+from .analizzatore import BASSO_SIGLE_MAX
 from .distribuzione import assegna as assegna_ruoli_stabili
 from .distribuzione import (copertura, migliore_per_frase, solista_per_registro,
                             solisti_ordinati)
+from .vincoli import AMBITO_MANI
 from .lingua import abbrev_strumento, etichetta_livello, nome_parte_da_id
 from .lingua import nota as nome_nota
 from .lingua import stile as nome_stile
@@ -296,9 +298,19 @@ def _climax(analisi: Analisi) -> List[int]:
 
 
 def linea_melodia(melodia: List[Nota], st: Strumento, liv: str,
-                  intervallo: Optional[Tuple[float, float]] = None) -> List[Evento]:
-    """La melodia NON viene alterata: solo trasposizione d'ottava se necessario."""
+                  intervallo: Optional[Tuple[float, float]] = None,
+                  minimo: Optional[int] = None) -> List[Evento]:
+    """
+    La melodia NON viene alterata: solo trasposizione d'ottava se necessario.
+
+    `minimo` alza il limite grave (la destra del pianoforte): l'ottava si
+    sceglie per l'intero blocco gia' qui, altrimenti il filtro delle mani
+    riporterebbe su le note gravi una per una, spezzando il profilo
+    (esempi/melodia_al_basso.xml).
+    """
     lo, hi = st.ambito(liv)
+    if minimo is not None:
+        lo = max(lo, minimo)
     ev: List[Evento] = []
     note = melodia
     if intervallo:
@@ -332,15 +344,25 @@ def linea_melodia(melodia: List[Nota], st: Strumento, liv: str,
 
 
 def _leviga_selettiva(eventi: List[Evento], lo: int, hi: int,
-                      immutabili: set) -> None:
+                      immutabili: set,
+                      ambito_rigo: Optional[Dict[int, Tuple[int, int]]] = None
+                      ) -> None:
     """
     Come `leviga_ottave`, ma non tocca gli eventi indicati (la melodia) e
     guarda ENTRAMBI i vicini: cosi' l'accompagnamento si avvicina anche
     all'ingresso della melodia, che non puo' essere spostato.
+
+    `ambito_rigo` restringe l'ambito rigo per rigo (le due mani del
+    pianoforte): senza, la destra veniva portata sotto il Sol3 per
+    avvicinarsi alla melodia, e il filtro delle mani la riportava su.
     """
     for i, e in enumerate(eventi):
         if e.pausa or len(e.altezze) != 1 or id(e) in immutabili or e.letterale:
             continue
+        lo_e, hi_e = lo, hi
+        if ambito_rigo and e.rigo in ambito_rigo:
+            lo_e = max(lo, ambito_rigo[e.rigo][0])
+            hi_e = min(hi, ambito_rigo[e.rigo][1])
         vicini: List[Tuple[int, float]] = []
         for j, contiguo in ((i - 1, lambda a, b: abs(a.fine - b.inizio) < 1e-6),
                             (i + 1, lambda a, b: abs(b.fine - a.inizio) < 1e-6)):
@@ -363,7 +385,7 @@ def _leviga_selettiva(eventi: List[Evento], lo: int, hi: int,
 
         costo_migliore = costo(migliore)
         for cand in (migliore + 12, migliore - 12, migliore + 24, migliore - 24):
-            if not (lo <= cand <= hi):
+            if not (lo_e <= cand <= hi_e):
                 continue
             if costo(cand) < costo_migliore:
                 migliore, costo_migliore = cand, costo(cand)
@@ -498,7 +520,8 @@ def _fondi_uguali(ev: List[Evento]) -> List[Evento]:
 
 def accordi_a_blocchi(analisi: Analisi, st: Strumento, liv: str,
                       groove: List[float], misure: List[Misura],
-                      senza_primo_movimento: bool = False) -> List[Evento]:
+                      senza_primo_movimento: bool = False,
+                      minimo: Optional[int] = None) -> List[Evento]:
     """
     Accordi a blocchi disposti sul GROOVE del brano, non semplicemente sulla
     durata dell'armonia: se l'originale ha basso sul primo movimento e accordo
@@ -513,7 +536,8 @@ def accordi_a_blocchi(analisi: Analisi, st: Strumento, liv: str,
 
     if not posizioni:
         for acc in analisi.armonia:
-            note = voicing(acc, max(lo, 48), min(hi, 79), n_note=n_note)
+            note = voicing(acc, max(lo, minimo or 48), min(hi, 79),
+                           n_note=n_note)
             if note:
                 ev.append(Evento(inizio=acc.inizio, durata=acc.durata,
                                  altezze=note, sigla=acc.sigla()))
@@ -532,7 +556,8 @@ def accordi_a_blocchi(analisi: Analisi, st: Strumento, liv: str,
             acc = _accordo_a(analisi.armonia, t)
             if acc is None:
                 continue
-            note = voicing(acc, max(lo, 48), min(hi, 79), n_note=n_note)
+            note = voicing(acc, max(lo, minimo or 48), min(hi, 79),
+                           n_note=n_note)
             if note:
                 ev.append(Evento(inizio=t, durata=fine - t, altezze=note,
                                  sigla=acc.sigla()))
@@ -561,14 +586,29 @@ def _posizioni_groove(groove: List[float], misure: List[Misura],
 
 
 def arpeggio(analisi: Analisi, st: Strumento, liv: str,
-             passo: float = 0.5, ampio: bool = False) -> List[Evento]:
+             passo: float = 0.5, ampio: bool = False,
+             minimo: Optional[int] = None,
+             sopra_a: Optional[List[Nota]] = None) -> List[Evento]:
+    """
+    Arpeggio sull'armonia. `sopra_a` sono note che suonano sotto l'arpeggio
+    (la sinistra dell'originale, copiata cosi' com'e'): accordo per accordo
+    l'arpeggio parte sopra la piu' acuta, altrimenti le due mani dello
+    stesso pianoforte si incrociano (stile Cinematico, Cinema Paradiso).
+    """
     L = livello(liv)
     if not L.arpeggi:
         passo = max(passo, 1.0)
     lo, hi = st.ambito(liv)
     ev: List[Evento] = []
     for acc in analisi.armonia:
-        note = voicing(acc, max(lo, 48), min(hi, 84), n_note=4 if ampio else 3)
+        pavimento = max(lo, minimo or 48)
+        if sopra_a:
+            sotto = [n.midi for n in sopra_a
+                     if n.inizio < acc.fine - 1e-6 and n.fine > acc.inizio + 1e-6]
+            if sotto:
+                pavimento = max(pavimento, max(sotto) + 1)
+        note = voicing(acc, pavimento, min(hi, 84),
+                       n_note=4 if ampio else 3)
         if not note:
             continue
         if ampio:
@@ -696,7 +736,8 @@ def dirada_ritmo(ritmo: List[Tuple[float, float]], misure: List[Misura],
 
 def accordi_su_ritmo(analisi: Analisi, st: Strumento, liv: str,
                      ritmo: List[Tuple[float, float]],
-                     arpeggia: bool = False) -> List[Evento]:
+                     arpeggia: bool = False,
+                     minimo: Optional[int] = None) -> List[Evento]:
     """
     Note dell'armonia disposte sul ritmo dell'accompagnamento originale.
     Serve agli strumenti che non possono copiare la figurazione alla lettera
@@ -712,7 +753,8 @@ def accordi_su_ritmo(analisi: Analisi, st: Strumento, liv: str,
         acc = _accordo_a(analisi.armonia, t)
         if acc is None or durata <= 1e-6:
             continue
-        note = sorted(set(voicing(acc, max(lo, 45), min(hi, 79), n_note=n_note)))
+        note = sorted(set(voicing(acc, max(lo, minimo or 45), min(hi, 79),
+                                  n_note=n_note)))
         if not note:
             continue
         if arpeggia:
@@ -730,9 +772,18 @@ def accordi_su_ritmo(analisi: Analisi, st: Strumento, liv: str,
     return ev
 
 
-def linea_basso(analisi: Analisi, st: Strumento, liv: str) -> List[Evento]:
-    """Riproduce la linea di basso dell'originale, ritmo compreso."""
+def linea_basso(analisi: Analisi, st: Strumento, liv: str,
+                massimo: Optional[int] = None) -> List[Evento]:
+    """
+    Riproduce la linea di basso dell'originale, ritmo compreso.
+
+    `massimo` tiene la linea nel registro di basso (la sinistra del
+    pianoforte, fino al Mi3): con l'estensione intera la levigatura la
+    portava fino al Sol3, dove cominciano gli accordi della destra.
+    """
     lo, hi = st.ambito(liv)
+    if massimo is not None:
+        hi = min(hi, massimo)
     ev = [Evento(inizio=n.inizio, durata=n.durata,
                  altezze=[nota_in_ambito(n.midi, lo, hi)])
           for n in analisi.basso]
@@ -742,8 +793,15 @@ def linea_basso(analisi: Analisi, st: Strumento, liv: str) -> List[Evento]:
 def basso_sostenuto(analisi: Analisi, st: Strumento, liv: str,
                    misure: List[Misura]) -> List[Evento]:
     """Una sola nota grave per misura (o per meta' misura): scrittura di
-    sostegno, diversa dal basso articolato del primo pianoforte."""
+    sostegno, diversa dal basso articolato del primo pianoforte.
+
+    La nota resta nel registro di basso (fino al Mi3): con l'estensione
+    intera del pianoforte la levigatura d'ottava la faceva salire di misura
+    in misura fino a Sol3-La#3, dentro il registro della destra, e le due
+    mani si scontravano (Cinema Paradiso con due pianoforti, 3a Media).
+    """
     lo, hi = st.ambito(liv)
+    hi = min(hi, BASSO_SIGLE_MAX)
     ev: List[Evento] = []
     for m in misure:
         acc_a = _accordo_a(analisi.armonia, m.inizio)
@@ -1256,7 +1314,9 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
         for blocco in _blocchi_contigui(porta_melodia):
             a = frasi[blocco[0]][0] if blocco[0] < len(frasi) else inizio
             b = frasi[blocco[-1]][1] if blocco[-1] < len(frasi) else fine
-            ev_melodia.extend(linea_melodia(analisi.melodia, st, liv_p, (a, b)))
+            ev_melodia.extend(linea_melodia(
+                analisi.melodia, st, liv_p, (a, b),
+                minimo=AMBITO_MANI[1][0] if p.righi == 2 else None))
 
         # glockenspiel raddoppia la melodia nei climax (cinematico)
         if cfg.stile == "Cinematico" and p.strumento in ("glockenspiel", "metallofono"):
@@ -1285,7 +1345,13 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
             if not mis_sub:
                 mis_sub = [m for m in misure if m.inizio < b and m.fine > a]
 
-            if p.ruolo == "basso" or (p.strumento == "violoncello" and p.ruolo != "melodia"):
+            # Il pianoforte col ruolo di basso NON passa di qui: il basso lo
+            # suona la sinistra (blocco piu' sotto), la destra accompagna. Qui
+            # la linea finiva sul rigo 1 e il filtro delle mani la alzava di
+            # due o tre ottave: un basso doppio, con la copia nel registro del
+            # canto (Dune, lead sheet dell'Inno alla gioia).
+            if (p.ruolo == "basso" and p.strumento != "pianoforte") \
+                    or (p.strumento == "violoncello" and p.ruolo != "melodia"):
                 if cfg.stile == "Jazz":
                     ev.extend(walking_bass(sotto, st, liv_p, mis_sub))
                 elif cfg.stile == "Cinematico":
@@ -1330,20 +1396,32 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                         mantieni_ottave=True)
                     # se nell'originale la destra fa solo melodia, qui tace:
                     # inventarle accordi produce solo collisioni con la sinistra
+                # gli accordi inventati nascono gia' nel registro della destra:
+                # sotto il Sol3 il filtro delle mani li riporterebbe su una
+                # nota alla volta, rovesciando l'accordo (Elvis, 1a Media)
                 elif cfg.stile == "Cinematico":
+                    # la sinistra del primo pianoforte sara' quella
+                    # dell'originale (vedi sotto): l'arpeggio le sta sopra
+                    copia_sinistra = usa_figurazione and p.variante % 2 == 0
                     destra = arpeggio(sotto, st, liv_p, passo=0.5,
-                                      ampio=(p.variante % 2 == 0))
+                                      ampio=(p.variante % 2 == 0),
+                                      minimo=AMBITO_MANI[1][0],
+                                      sopra_a=[n for n in sp.note if n.rigo == 2]
+                                      if copia_sinistra else None)
                 elif usa_figurazione and ritmo:
                     destra = accordi_su_ritmo(
                         sotto, st, liv_p,
                         dirada_ritmo(ritmo, mis_sub, per_movimento=2),
-                        arpeggia=(p.variante % 2 == 1))
+                        arpeggia=(p.variante % 2 == 1),
+                        minimo=AMBITO_MANI[1][0])
                 elif p.variante % 2 == 1:
-                    destra = arpeggio(sotto, st, liv_p, passo=0.5, ampio=False)
+                    destra = arpeggio(sotto, st, liv_p, passo=0.5, ampio=False,
+                                      minimo=AMBITO_MANI[1][0])
                 else:
                     destra = accordi_a_blocchi(sotto, st, liv_p,
                                                analisi.groove, mis_sub,
-                                               senza_primo_movimento=True)
+                                               senza_primo_movimento=True,
+                                               minimo=AMBITO_MANI[1][0])
                 for e in destra:
                     e.rigo = 1
                 ev.extend(destra)
@@ -1403,7 +1481,8 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
             elif p.variante % 2 == 1:
                 sinistra = basso_sostenuto(tutto, st, liv_p, misure)
             else:
-                sinistra = linea_basso(tutto, st, liv_p)
+                sinistra = linea_basso(tutto, st, liv_p,
+                                       massimo=BASSO_SIGLE_MAX)
             for e in sinistra:
                 e.rigo = 2
                 if not e.letterale:
@@ -1421,7 +1500,8 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
         lo_p, hi_p = st.ambito(liv_p)
         ordinati = sorted(ev, key=lambda e: (e.rigo, e.inizio))
         for _ in range(3):        # poche passate: la correzione si propaga
-            _leviga_selettiva(ordinati, lo_p, hi_p, id_melodia)
+            _leviga_selettiva(ordinati, lo_p, hi_p, id_melodia,
+                              AMBITO_MANI if p.righi == 2 else None)
         # il respiro prima dell'entrata della melodia si puo' prendere anche
         # accorciando una voce interna: si cambia una durata, non un'altezza
         _respiro_prima_della_melodia(ordinati, {id(e) for e in ev_melodia})

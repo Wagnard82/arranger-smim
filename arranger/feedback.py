@@ -89,7 +89,7 @@ def componi(mittente: str, destinatario: str, nome: str, email: str,
     """Il messaggio completo, pronto per smtplib."""
     tenuti, scartati = entro_i_limiti(allegati)
     msg = EmailMessage()
-    msg["Subject"] = (f"[Arranger SMIM] [{lingua.upper()}] {categoria} - "
+    msg["Subject"] = (f"[ScoreCraft Edu] [{lingua.upper()}] {categoria} - "
                       f"da {nome or 'anonimo'}"
                       + (f" [{len(tenuti)} allegati]" if tenuti else ""))
     msg["From"] = mittente

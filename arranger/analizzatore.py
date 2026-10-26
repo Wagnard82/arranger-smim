@@ -1599,9 +1599,18 @@ def _melodia_affidabile(sp: Spartito, melodia: List[Nota],
     dare a uno strumento: c'e' una tessitura. Se la melodia riconosciuta copre
     poco del brano, o e' fatta di frammenti sparsi, conviene ammetterlo e
     orchestrare i registri invece di inventare un solista.
+
+    Il controllo vale solo per la melodia DEDOTTA. Quando e' scritta - parte
+    del solista con pianoforte, o lead sheet - e' affidabile per definizione:
+    una canzone ha introduzioni e pause fra le frasi, e in Let It Be la voce
+    copre il 46% della durata. Applicarle la soglia faceva orchestrare per
+    registri un brano con il tema scritto, senza affidarlo a nessuno.
     """
     if not melodia or not sp.misure:
         return False
+    if sp.tipo in ("solista_e_piano", "lead_sheet") \
+            and sp.parte_solista is not None:
+        return True
     copertura = sum(n.durata for n in melodia) / (sp.durata_totale or 1)
     if copertura < copertura_minima:
         return False

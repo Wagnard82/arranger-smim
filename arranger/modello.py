@@ -1,5 +1,5 @@
 """
-Modello dati interno di Arranger SMIM.
+Modello dati interno di ScoreCraft Edu.
 
 Tutto il sistema lavora su questa rappresentazione neutra (nessuna dipendenza
 esterna). Il MusicXML entra da `ingestione`, la partitura esce da `esportatore`.

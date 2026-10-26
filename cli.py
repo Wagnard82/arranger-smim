@@ -48,7 +48,7 @@ def organico(testo: str) -> dict:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Arranger SMIM")
+    ap = argparse.ArgumentParser(description="ScoreCraft Edu")
     ap.add_argument("sorgente",
                     help="spartito in MusicXML (.xml, .musicxml, .mxl): "
                          "riduzione per pianoforte, parte solista con "

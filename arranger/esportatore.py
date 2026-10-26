@@ -147,6 +147,90 @@ def scomponi(unita: int) -> List[Tuple[str, int, Optional[Tuple[int, int]], int]
     return out
 
 
+# livello di trave di ogni valore: 1 = croma, 2 = semicroma, ...
+LIVELLI_TRAVE = {"eighth": 1, "16th": 2, "32nd": 3}
+
+
+def movimento_travature(m: Misura) -> float:
+    """
+    Ampiezza del gruppo di travature: il movimento, tranne nei tempi in
+    ottavi semplici (3/8, 2/8), dove si trava la battuta intera.
+    """
+    if m.den == 8 and not m.composto:
+        return m.durata_piena
+    return m.unita_movimento
+
+
+def travature(frammenti: List[Tuple[float, str, bool]], movimento: float,
+              meta_battuta: bool = False) -> List[List[Tuple[int, str]]]:
+    """
+    Le travature di una voce in una misura, come vanno scritte nel MusicXML.
+
+    `frammenti` sono le note e pause della voce in ordine: (inizio dentro la
+    battuta piena, tipo, pausa). Restituisce per ciascuno la lista dei
+    <beam> da scrivere: [(numero, "begin"/"continue"/"end"/"forward hook"/
+    "backward hook")], vuota se il valore non si trava.
+
+    Senza <beam> MuseScore ricalcola le travature da solo, Dorico invece
+    importa le crome separate: vanno scritte esplicitamente.
+
+    Si trava dentro il movimento; le pause interrompono. Con `meta_battuta`
+    (4/4) due movimenti di sole crome si uniscono in un gruppo di quattro,
+    come si stampa di solito.
+    """
+    fuori: List[List[Tuple[int, str]]] = [[] for _ in frammenti]
+    gruppi: List[Tuple[int, List[int]]] = []    # (movimento, indici)
+    corrente: List[int] = []
+    mov_corrente = None
+    for i, (t, tipo, pausa) in enumerate(frammenti):
+        mov = int(t / movimento + 1e-6)
+        travabile = not pausa and tipo in LIVELLI_TRAVE
+        if travabile and corrente and mov == mov_corrente:
+            corrente.append(i)
+            continue
+        if len(corrente) >= 2:
+            gruppi.append((mov_corrente, corrente))
+        corrente = [i] if travabile else []
+        mov_corrente = mov
+    if len(corrente) >= 2:
+        gruppi.append((mov_corrente, corrente))
+
+    if meta_battuta:
+        def due_crome(mov: int, g: List[int]) -> bool:
+            return (len(g) == 2
+                    and all(frammenti[i][1] == "eighth" for i in g)
+                    and abs(frammenti[g[0]][0] - mov * movimento) < 1e-6)
+        uniti: List[Tuple[int, List[int]]] = []
+        for mov, g in gruppi:
+            if (uniti and mov % 2 == 1 and uniti[-1][0] == mov - 1
+                    and due_crome(mov, g) and due_crome(*uniti[-1])
+                    and uniti[-1][1][-1] == g[0] - 1):
+                uniti[-1] = (mov, uniti[-1][1] + g)
+            else:
+                uniti.append((mov, g))
+        gruppi = uniti
+
+    for _mov, g in gruppi:
+        for livello in range(1, max(LIVELLI_TRAVE.values()) + 1):
+            corsa: List[int] = []
+            for pos, i in enumerate(g + [-1]):
+                if i >= 0 and LIVELLI_TRAVE[frammenti[i][1]] >= livello:
+                    corsa.append(pos)
+                    continue
+                if len(corsa) >= 2:
+                    for q, pp in enumerate(corsa):
+                        valore = ("begin" if q == 0 else
+                                  "end" if q == len(corsa) - 1 else "continue")
+                        fuori[g[pp]].append((livello, valore))
+                elif len(corsa) == 1:
+                    # una semicroma sola nel gruppo: moncone verso il vicino
+                    pp = corsa[0]
+                    fuori[g[pp]].append(
+                        (livello, "forward hook" if pp == 0 else "backward hook"))
+                corsa = []
+    return fuori
+
+
 # --------------------------------------------------------------------------
 
 
@@ -171,7 +255,7 @@ class EsportatoreMusicXML:
             righe.append(f'    <creator type="composer">{escape(self.p.compositore)}</creator>')
         righe.append("    <encoding>")
         from .versione import VERSIONE
-        righe.append(f"      <software>Arranger SMIM {VERSIONE}</software>")
+        righe.append(f"      <software>ScoreCraft Edu {VERSIONE}</software>")
         righe.append("    </encoding>")
         righe.append("  </identification>")
         righe.append("  <movement-title>"
@@ -317,6 +401,21 @@ class EsportatoreMusicXML:
                      if m.inizio - 1e-6 <= c[0] < m.fine - 1e-6]
         k_sigla = 0
 
+        # le travature si calcolano prima, sull'intera voce della misura;
+        # nelle misure parziali (anacrusi) i movimenti si contano dalla fine
+        scarto = m.durata_piena - m.durata if m.parziale else 0.0
+        elenco: List[Tuple[float, str, bool]] = []
+        for e, _lp, _ld in pezzi:
+            unita = _unita(e.durata)
+            if unita <= 0:
+                continue
+            t = e.inizio - m.inizio + scarto
+            for tipo, _punti, _tm, u in scomponi(unita):
+                elenco.append((t, tipo, e.pausa))
+                t += u / DIV
+        travi = iter(travature(elenco, movimento_travature(m),
+                               meta_battuta=(m.num == 4 and m.den == 4)))
+
         for e, legato_prima, legato_dopo in pezzi:
             unita = _unita(e.durata)
             if unita <= 0:
@@ -352,6 +451,7 @@ class EsportatoreMusicXML:
                 chiusura = None
             for k, (tipo, punti, tm, u) in enumerate(frammenti):
                 ultimo = (k == len(frammenti) - 1)
+                trave = next(travi, [])
                 if e.pausa:
                     r.extend(self._nota_xml(None, u, tipo, punti, tm, rigo, righi,
                                             parte, False, False, None))
@@ -362,7 +462,8 @@ class EsportatoreMusicXML:
                             accordo=(j > 0),
                             legatura_inizio=(legato_dopo and ultimo) or not ultimo,
                             legatura_fine=(legato_prima and k == 0) or k > 0,
-                            articolazione=e.articolazione if (k == 0 and j == 0) else None))
+                            articolazione=e.articolazione if (k == 0 and j == 0) else None,
+                            trave=trave if j == 0 else None))
             if chiusura:
                 r.append(chiusura)
         return r
@@ -375,7 +476,8 @@ class EsportatoreMusicXML:
     def _nota_xml(self, altezza: Optional[int], unita: int, tipo: str, punti: int,
                   tm: Optional[Tuple[int, int]], rigo: int, righi: int, parte: Parte,
                   accordo: bool, legatura_inizio: bool, legatura_fine: bool,
-                  articolazione: Optional[str] = None) -> List[str]:
+                  articolazione: Optional[str] = None,
+                  trave: Optional[List[Tuple[int, str]]] = None) -> List[str]:
         st = strumento(parte.strumento)
         r = ["      <note>"]
         if accordo:
@@ -416,6 +518,9 @@ class EsportatoreMusicXML:
             r.append("        </time-modification>")
         if righi == 2:
             r.append(f"        <staff>{rigo}</staff>")
+        # <beam> va dopo <staff> e prima di <notations>, come vuole lo schema
+        for numero, valore in trave or []:
+            r.append(f'        <beam number="{numero}">{valore}</beam>')
         notazioni = []
         if altezza is not None and (legatura_inizio or legatura_fine):
             if legatura_fine:

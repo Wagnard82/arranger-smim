@@ -1256,6 +1256,310 @@ def test_registro_mano_destra(inno):
     verifica(not basse, f"mano destra sotto il Sol3: {basse[:5]}")
 
 
+def test_pianoforte_basso_nella_sinistra():
+    """
+    Col ruolo di basso il pianoforte suona il basso con la sinistra e
+    accompagna con la destra. Prima la linea di basso finiva anche sul rigo
+    della destra e il filtro delle mani la alzava di due o tre ottave: sul
+    lead sheet dell'Inno alla gioia un avviso [Mani] quasi a ogni battuta, in
+    Dune 68 in 3a Media.
+    """
+    percorso = genera_esempi.lead_sheet(os.path.join(QUI, "_out", "lead.xml"))
+    cfg = Configurazione(formazione={"flauto": 2, "violino": 2,
+                                     "pianoforte": 1},
+                         livello="1a Media", stile="Normale")
+    r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+               nome_base="pf_basso")
+    pf = next(p for p in r.partitura.parti if p.strumento == "pianoforte")
+    verifica(pf.ruolo == "basso",
+             f"caso di prova non valido: il pianoforte fa {pf.ruolo}")
+    mani = [x for x in r.report if x.startswith("[Mani]")]
+    verifica(not mani, f"{len(mani)} avvisi [Mani]: {mani[:2]}")
+    sinistra = [a for e in pf.eventi if e.rigo == 2 for a in e.altezze]
+    verifica(sinistra and max(sinistra) < 55,
+             "il basso del pianoforte non sta nella sinistra")
+    destra = [e for e in pf.eventi if e.rigo == 1 and not e.pausa]
+    verifica(sum(len(e.altezze) >= 2 for e in destra) >= len(destra) // 2,
+             "la destra del pianoforte-basso non accompagna con accordi")
+
+
+def test_mani_rispettano_il_letterale():
+    """
+    Il filtro delle mani non sposta le note copiate dall'originale: un Fa4
+    scritto alla sinistra (Cinema Paradiso) o un Re3 alla destra (Dune) e'
+    scrittura del pianista. Le note generate dal motore invece si riportano
+    nel registro della mano.
+    """
+    from arranger.modello import Evento, Parte, Partitura
+    from arranger.vincoli import filtro_mani
+    pf = Parte(id="pianoforte1", nome="Pianoforte", abbrev="Pf.",
+               strumento="pianoforte", righi=2, eventi=[
+                   Evento(0.0, 1.0, [65], rigo=2, letterale=True),
+                   Evento(1.0, 1.0, [50], rigo=1, letterale=True),
+                   Evento(2.0, 1.0, [65], rigo=2),
+                   Evento(3.0, 1.0, [50], rigo=1)])
+    part = Partitura(parti=[pf], misure=[Misura(numero=1, inizio=0.0,
+                                                durata=4.0)])
+    filtro_mani(part)
+    verifica([e.altezze for e in pf.eventi] == [[65], [50], [53], [62]],
+             f"filtro delle mani errato: {[e.altezze for e in pf.eventi]}")
+    verifica(len([x for x in part.report if x.startswith("[Mani]")]) == 2,
+             f"avvisi [Mani] attesi solo per le note generate: {part.report}")
+
+
+def test_accordi_nel_registro_della_destra():
+    """
+    Gli accordi e gli arpeggi inventati per la destra nascono gia' sopra il
+    Sol3, e la levigatura non li riporta sotto. Prima nascevano dal Do3 (o
+    dal La2) e il filtro delle mani li riportava su una nota alla volta,
+    rovesciando l'accordo: 11 avvisi su Elvis in 1a Media, fino a 12 su
+    Cinema Paradiso con due pianoforti.
+    """
+    d = os.path.join(os.path.dirname(QUI), "esempi")
+    casi = [("lead_sheet.xml", "2a Media", "Normale"),
+            ("inno_alla_gioia.xml", "2a Media", "Cinematico"),
+            ("basso_ritmico.xml", "1a Media", "Normale"),
+            ("sigle_sei_ottavi.xml", "1a Media", "Normale")]
+    for nome, liv, stile in casi:
+        percorso = os.path.join(d, nome)
+        if nome == "lead_sheet.xml":
+            percorso = genera_esempi.lead_sheet(
+                os.path.join(QUI, "_out", "lead.xml"))
+        cfg = Configurazione(formazione={"flauto": 1, "pianoforte": 2},
+                             livello=liv, stile=stile)
+        r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+                   nome_base="dx_registro")
+        mani = [x for x in r.report if x.startswith("[Mani]")]
+        verifica(not mani, f"{nome} {liv} {stile}: {len(mani)} avvisi [Mani]")
+        for p in r.partitura.parti:
+            if p.strumento != "pianoforte" or p.ruolo == "melodia":
+                continue
+            basse = [a for e in p.eventi if e.rigo == 1 and not e.letterale
+                     for a in e.altezze if a < 55]
+            verifica(not basse, f"{nome} {liv} {stile}, {p.nome}: destra "
+                                f"sotto il Sol3 {basse[:4]}")
+
+
+def test_melodia_grave_al_pianoforte(basso):
+    """
+    Una melodia grave affidata al pianoforte sale nella destra tutta
+    insieme, di un'ottava per l'intero blocco. Prima restava fra Do3 e Fa3 e
+    il filtro delle mani la riportava su nota per nota, spezzando il profilo
+    (6 avvisi [Mani] su esempi/melodia_al_basso.xml in 1a Media).
+    """
+    an = analizzatore.analizza(ingestione.da_musicxml(basso))
+    for liv in ("1a Media", "2a Media", "3a Media"):
+        cfg = Configurazione(formazione={"flauto": 1, "pianoforte": 2},
+                             livello=liv, stile="Normale")
+        r = esegui(basso, cfg, cartella=os.path.join(QUI, "_out"),
+                   nome_base="melodia_grave")
+        mani = [x for x in r.report if x.startswith("[Mani]")]
+        verifica(not mani, f"{liv}: {len(mani)} avvisi [Mani]")
+        pf = next((p for p in r.partitura.parti
+                   if p.strumento == "pianoforte" and p.ruolo == "melodia"),
+                  None)
+        verifica(pf is not None, f"{liv}: il pianoforte non ha la melodia")
+        if pf is None:
+            continue
+        per_attacco = {round(e.inizio, 3): e for e in pf.eventi
+                       if e.rigo == 1 and len(e.altezze) == 1}
+        scarti = [per_attacco[round(n.inizio, 3)].altezze[0] - n.midi
+                  for n in an.melodia
+                  if round(n.inizio, 3) in per_attacco
+                  and (per_attacco[round(n.inizio, 3)].altezze[0]
+                       - n.midi) % 12 == 0]
+        verifica(len(scarti) >= 5 and len(set(scarti)) == 1,
+                 f"{liv}: melodia trasposta nota per nota, scarti {scarti}")
+
+
+def test_due_pianoforti_indipendenti(inno, canzone):
+    """
+    Pianoforte 1 e 2 sono due strumenti distinti: il secondo puo' suonare
+    sopra il primo, non deve incrociare le proprie mani. Prima veniva
+    schiacciato sotto la cima del primo (arpeggi ridotti a una nota
+    ribattuta) e la sua sinistra, il basso sostenuto, saliva fino al La#3
+    scontrandosi con la destra: 35 incroci su Cinema Paradiso in 3a Media.
+    """
+    for percorso in (inno, canzone):
+        for liv in ("2a Media", "3a Media"):
+            cfg = Configurazione(formazione={"flauto": 2, "chitarra": 2,
+                                             "violino": 2, "pianoforte": 2},
+                                 livello=liv, stile="Normale")
+            r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+                       nome_base="due_pf")
+            nome = os.path.basename(percorso)
+            pf2 = next(p for p in r.partitura.parti
+                       if p.strumento == "pianoforte" and p.variante == 1)
+            verifica(not any(x.startswith("[Divisi]") and pf2.nome in x
+                             and "Pianoforte 1" in x for x in r.report),
+                     f"{nome} {liv}: Pianoforte 2 riportato sotto il Pianoforte 1")
+            incroci = [x for x in r.report
+                       if x.startswith("[Incroci]") and pf2.nome in x]
+            verifica(not incroci, f"{nome} {liv}: {len(incroci)} incroci "
+                                  f"nel {pf2.nome}")
+            alte = [a for e in pf2.eventi if e.rigo == 2 and not e.letterale
+                    for a in e.altezze if a > 52]
+            verifica(not alte, f"{nome} {liv}: basso sostenuto sopra il Mi3 "
+                               f"{alte[:4]}")
+
+
+def test_travature(inno, sei_ottavi):
+    """
+    Le crome vanno travate nel MusicXML con <beam>: senza, MuseScore le
+    ritrava da solo ma Dorico le importa tutte separate.
+    """
+    from arranger.esportatore import travature
+    E, S, Q = "eighth", "16th", "quarter"
+    otto = travature([(i * 0.5, E, False) for i in range(8)], 1.0, True)
+    verifica([v for x in otto for _, v in x] ==
+             ["begin", "continue", "continue", "end"] * 2,
+             f"4/4: otto crome in due gruppi da quattro -> {otto}")
+    puntata = travature([(0, E, False), (0.75, S, False), (1, Q, False)], 1.0)
+    verifica(puntata == [[(1, "begin")], [(1, "end"), (2, "backward hook")], []],
+             f"croma puntata e semicroma -> {puntata}")
+    pausa = travature([(0, E, False), (0.5, E, True), (1, E, False),
+                       (1.5, E, False)], 1.0, True)
+    verifica(pausa == [[], [], [(1, "begin")], [(1, "end")]],
+             f"la pausa interrompe la travatura -> {pausa}")
+    composto = travature([(i * 0.5, E, False) for i in range(6)], 1.5)
+    verifica([v for x in composto for _, v in x] ==
+             ["begin", "continue", "end"] * 2,
+             f"6/8: crome a gruppi di tre -> {composto}")
+
+    for percorso, nome in ((inno, "trav_inno"), (sei_ottavi, "trav_68")):
+        cfg = Configurazione(formazione={"flauto": 2, "chitarra": 2,
+                                         "violino": 2, "pianoforte": 1},
+                             livello="3a Media", stile="Normale")
+        r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+                   nome_base=nome)
+        radice = ET.parse(r.percorso_xml).getroot()
+        crome = travate = 0
+        for parte in radice.iter("part"):
+            for misura in parte.iter("measure"):
+                aperti = {}     # (voce, livello) -> travature aperte
+                for nota in misura.iter("note"):
+                    figli = [c.tag for c in nota]
+                    if "beam" in figli:
+                        travate += 1
+                        if "staff" in figli:
+                            verifica(figli.index("beam") > figli.index("staff"),
+                                     "<beam> prima di <staff>")
+                        if "notations" in figli:
+                            verifica(figli.index("beam") < figli.index("notations"),
+                                     "<beam> dopo <notations>")
+                    if (nota.findtext("type") == "eighth"
+                            and nota.find("rest") is None
+                            and nota.find("chord") is None):
+                        crome += 1
+                    for b in nota.iter("beam"):
+                        chiave = (nota.findtext("voice"), b.get("number"))
+                        if b.text == "begin":
+                            aperti[chiave] = aperti.get(chiave, 0) + 1
+                        elif b.text == "end":
+                            aperti[chiave] = aperti.get(chiave, 0) - 1
+                verifica(all(v == 0 for v in aperti.values()),
+                         f"{nome}: travatura aperta e mai chiusa nella misura "
+                         f"{misura.get('number')}")
+        # nell'Inno le crome sono isolate (semiminima puntata e croma, o
+        # crome a cavallo del centro della battuta): solo il 6/8 ne ha da
+        # travare per forza
+        if percorso == sei_ottavi:
+            verifica(crome > 0 and travate > 0,
+                     f"{nome}: nessuna croma travata ({crome} crome)")
+
+
+def test_arpeggio_cinematico_sopra_la_sinistra():
+    """
+    Nello stile Cinematico il primo pianoforte tiene la sinistra
+    dell'originale e inventa un arpeggio per la destra: l'arpeggio deve
+    nascere sopra la nota piu' acuta della sinistra. Prima partiva dal Sol3
+    anche sotto accordi della sinistra fino al Fa4: 87 incroci su Cinema
+    Paradiso in 3a Media, 786 nella prova a tappeto.
+    """
+    from arranger.modello import Accordo, Analisi
+    sinistra = [Nota(midi=60, inizio=0.0, durata=4.0, rigo=2),
+                Nota(midi=65, inizio=0.0, durata=4.0, rigo=2)]
+    an = Analisi(armonia=[Accordo(inizio=0.0, durata=4.0,
+                                               fondamentale=10, qualita="maj")])
+    ev = orchestratore.arpeggio(an, strumento("pianoforte"), "3a Media",
+                                minimo=55, sopra_a=sinistra)
+    verifica(ev and min(a for e in ev for a in e.altezze) > 65,
+             f"arpeggio sotto la sinistra: {[e.altezze for e in ev]}")
+
+    for nome in ("canzone.xml", "seconda_voce.xml", "sinistra_arpeggiata.xml"):
+        percorso = os.path.join(os.path.dirname(QUI), "esempi", nome)
+        cfg = Configurazione(formazione={"flauto": 2, "clarinetto": 1,
+                                         "violino": 2, "violoncello": 1,
+                                         "chitarra": 2, "pianoforte": 1},
+                             livello="3a Media", stile="Cinematico")
+        r = esegui(percorso, cfg, cartella=os.path.join(QUI, "_out"),
+                   nome_base="cine_incroci")
+        incroci = [x for x in r.report if x.startswith("[Incroci]")]
+        verifica(len(incroci) <= 2, f"{nome}: {len(incroci)} incroci delle "
+                                    "mani nello stile Cinematico")
+
+
+def test_basso_sinistra_nel_registro(canzone):
+    """
+    La linea di basso inventata per la sinistra del pianoforte resta nel
+    registro di basso (fino al Mi3). Prima la levigatura la portava fino al
+    Sol3 e incrociava gli accordi della destra: 10 incroci su canzone.xml in
+    1a Media, 48 nella prova a tappeto.
+    """
+    cfg = Configurazione(formazione={"flauto": 2, "clarinetto": 1,
+                                     "violino": 2, "violoncello": 1,
+                                     "chitarra": 2, "pianoforte": 1},
+                         livello="1a Media", stile="Normale")
+    r = esegui(canzone, cfg, cartella=os.path.join(QUI, "_out"),
+               nome_base="basso_sx")
+    incroci = [x for x in r.report if x.startswith("[Incroci]")]
+    verifica(not incroci, f"{len(incroci)} incroci delle mani: {incroci[:2]}")
+    pf = next(p for p in r.partitura.parti if p.strumento == "pianoforte")
+    alte = [a for e in pf.eventi if e.rigo == 2 and not e.letterale
+            for a in e.altezze if a > 52]
+    verifica(not alte, f"basso della sinistra sopra il Mi3: {alte[:4]}")
+
+
+def test_corno(inno):
+    """
+    Il corno in Fa: ottone, scritto una quinta giusta sopra il suono reale.
+    Nel MusicXML: <transpose> -4/-7 e un diesis in piu' in armatura.
+    """
+    from arranger.lingua import nome_strumento
+    st = strumento("corno")
+    verifica(st.famiglia == "ottoni" and st.trasposizione == 7,
+             f"corno: famiglia {st.famiglia}, trasposizione {st.trasposizione}")
+    verifica(nome_strumento("corno", "en") == "Horn in F",
+             f"nome inglese del corno: {nome_strumento('corno', 'en')}")
+    for liv in ("1a Media", "2a Media", "3a Media"):
+        cfg = Configurazione(formazione={"flauto": 2, "corno": 2,
+                                         "violino": 2, "pianoforte": 1},
+                             livello=liv, stile="Normale")
+        r = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"),
+                   nome_base="corno")
+        corni = [p for p in r.partitura.parti if p.strumento == "corno"]
+        verifica(len(corni) == 2, f"{liv}: {len(corni)} parti di corno")
+        lo, hi = st.ambito(liv)
+        for p in corni:
+            suona = [a for e in p.eventi for a in e.altezze]
+            verifica(suona, f"{liv}: {p.nome} non suona mai")
+            fuori = [a for a in suona if not lo <= a <= hi]
+            verifica(not fuori, f"{liv}: {p.nome} fuori estensione {fuori[:4]}")
+        radice = ET.parse(r.percorso_xml).getroot()
+        nomi = {sp.get("id"): sp.findtext("part-name")
+                for sp in radice.iter("score-part")}
+        for parte in radice.iter("part"):
+            if not nomi[parte.get("id")].startswith("Corno"):
+                continue
+            primo = parte.find("measure/attributes")
+            verifica(primo.findtext("transpose/chromatic") == "-7"
+                     and primo.findtext("transpose/diatonic") == "-4",
+                     f"{nomi[parte.get('id')]}: <transpose> errato")
+            verifica(primo.findtext("key/fifths") == "1",
+                     f"{nomi[parte.get('id')]}: armatura scritta "
+                     f"{primo.findtext('key/fifths')} invece di 1 (Do -> Sol)")
+
+
 def test_divisi_piu_facili(inno, canzone):
     """
     I leggii successivi al primo non suonano mai sopra il primo e hanno valori
@@ -1415,6 +1719,33 @@ def test_voce_e_pianoforte(voce_piano, inno):
         scarti = {a - b for a, b in zip(suonate, attesa)}
         verifica(len(suonate) == len(attesa) and len(scarti) == 1,
                  f"la melodia scritta non e' stata riportata: {suonate}")
+
+
+def test_melodia_scritta_sempre_affidabile(voce_piano):
+    """
+    La melodia scritta del solista non passa la soglia di copertura pensata
+    per quella dedotta. In Let It Be la voce tace nell'introduzione e fra le
+    frasi (46% della durata): il brano finiva orchestrato per registri, senza
+    nessuno strumento a suonare il tema.
+    """
+    sp = ingestione.da_musicxml(voce_piano)
+    # la voce tace nelle prime due misure: copertura 50%, sotto la soglia
+    sp.note = [n for n in sp.note
+               if not (n.origine == sp.parte_solista
+                       and n.inizio < sp.misure[2].inizio - 1e-6)]
+    an = analizzatore.analizza(sp)
+    verifica(an.melodia_affidabile,
+             "la melodia scritta del solista e' stata giudicata inaffidabile")
+
+    cfg = Configurazione(formazione={"flauto": 1, "pianoforte": 1,
+                                     "violoncello": 1},
+                         livello="1a Media", stile="Normale")
+    r = esegui(voce_piano, cfg, cartella=os.path.join(QUI, "_out"),
+               nome_base="voce_rada", spartito=sp)
+    verifica(not any(x.startswith("[Tessitura]") for x in r.report),
+             "un brano con la melodia scritta e' stato orchestrato per registri")
+    verifica(any(p.ruolo == "melodia" for p in r.partitura.parti),
+             "nessuno strumento suona la melodia scritta")
 
 
 def test_fiati_respirano(inno):
@@ -2249,6 +2580,7 @@ def test_feedback_allegati(inno):
 def test_manifesto_file():
     """manifesto.json e' aggiornato, e un file vecchio o mancante viene
     riconosciuto per nome (il caso del repository aggiornato a meta')."""
+    import json
     import shutil
     import tempfile
     radice = os.path.dirname(QUI)
@@ -2263,7 +2595,16 @@ def test_manifesto_file():
              f"manifesto.json non aggiornato (mancanti {mancanti}, diversi "
              f"{diversi}): eseguire «python controllo_file.py --scrivi»")
     copia = os.path.join(tempfile.mkdtemp(), "server")
-    shutil.copytree(radice, copia, ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    # si copia solo cio' che il manifesto controlla: in una cartella di
+    # lavoro vera ci sono anche virtualenv (con collegamenti simbolici),
+    # archivi e file audio che non c'entrano
+    os.makedirs(copia)
+    with open(os.path.join(radice, "manifesto.json"), encoding="utf-8") as f:
+        elencati = list(json.load(f)["file"]) + ["manifesto.json"]
+    for rel in elencati:
+        destinazione = os.path.join(copia, *rel.split("/"))
+        os.makedirs(os.path.dirname(destinazione), exist_ok=True)
+        shutil.copy2(os.path.join(radice, *rel.split("/")), destinazione)
     with open(os.path.join(copia, "arranger", "esportatore.py"), "a") as f:
         f.write("\n# versione vecchia\n")
     os.remove(os.path.join(copia, "arranger", "feedback.py"))
@@ -2348,6 +2689,15 @@ if __name__ == "__main__":
     test_sigle_dallo_spartito(sigle_68)
     test_accompagnamento_in_sei_ottavi(sigle_68)
     test_registro_mano_destra(inno)
+    test_pianoforte_basso_nella_sinistra()
+    test_mani_rispettano_il_letterale()
+    test_accordi_nel_registro_della_destra()
+    test_melodia_grave_al_pianoforte(basso)
+    test_due_pianoforti_indipendenti(inno, canzone)
+    test_travature(inno, sei_ottavi)
+    test_arpeggio_cinematico_sopra_la_sinistra()
+    test_basso_sinistra_nel_registro(canzone)
+    test_corno(inno)
     test_divisi_piu_facili(inno, canzone)
     test_mano_sinistra_non_sale(inno)
     test_livello_per_strumento_precedenza()
@@ -2355,6 +2705,7 @@ if __name__ == "__main__":
     test_senza_livelli_per_strumento_nulla_cambia()
     test_frasi_music21_euristiche()
     test_voce_e_pianoforte(voce_piano, inno)
+    test_melodia_scritta_sempre_affidabile(voce_piano)
     test_fiati_respirano(inno)
     test_modo_tessitura(seconda)
     test_mani_pianoforte(inno)

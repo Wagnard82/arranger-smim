@@ -1,6 +1,8 @@
-# Arranger SMIM
+# ScoreCraft Edu
 
-**Versione 0.9.5.** Il registro delle modifiche vive in `arranger/versione.py`
+*Fino alla 0.9.5 il progetto si chiamava Arranger SMIM.*
+
+**Versione 0.9.6.** Il registro delle modifiche vive in `arranger/versione.py`
 (`VERSIONE`, `NOVITA`) ed e' mostrato dall'interfaccia in una colonna a destra:
 chi prova una versione nuova deve sapere che cosa e' cambiato senza andarlo a
 cercare. La stessa versione finisce nel tag `<software>` del MusicXML e nel
@@ -573,7 +575,7 @@ Sulla stessa sonatina gli interventi automatici scendono da 883 a 168, e dei
 
 MusicXML 4.0 partwise con: nomi e abbreviazioni degli strumenti, graffa del
 pianoforte (`<staves>2</staves>` con chiavi di violino e basso),
-**armature di chiave trasposte** e `<transpose>` per clarinetto/sax/tromba,
+**armature di chiave trasposte** e `<transpose>` per clarinetto/sax/corno/tromba,
 chiave di percussione con `<unpitched>`, sigle accordali (`<harmony>`) sulla
 chitarra, articolazioni (staccato, accento, tenuto, tremolo, pizz.), legature
 di valore ai cambi di misura, terzine, metronomo e indicazione di swing.

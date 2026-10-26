@@ -1,4 +1,4 @@
-"""Arranger SMIM - arrangiatore automatico per orchestra scolastica."""
+"""ScoreCraft Edu (ex Arranger SMIM) - arrangiatore automatico per orchestra scolastica."""
 
 from .modello import (Accordo, Analisi, Configurazione, Evento, Misura, Nota,
                       Parte, Partitura, Spartito)

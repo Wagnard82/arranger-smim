@@ -66,6 +66,18 @@ REGISTRO: Dict[str, Strumento] = {
         trasposizione=9, programma_midi=65, famiglia="fiati",
         ruoli=["melodia", "controcanto", "armonia"],
     ),
+    "corno": Strumento(
+        chiave="corno", nome="Corno in Fa", abbrev="Cr.",
+        # Scritto una quinta giusta sopra il suono reale. Estensioni a suono
+        # reale, ricavate dagli ambiti scritti tipici dei primi anni (DA
+        # VERIFICARE con un docente di corno):
+        #   1a Media  scritto Do4-Do5  -> reale Fa3-Fa4
+        #   2a Media  scritto Sol3-Mi5 -> reale Do3-La4
+        #   3a Media  scritto Fa3-Sol5 -> reale Sib2-Do5
+        estensione={"1a Media": (53, 65), "2a Media": (48, 69), "3a Media": (46, 72)},
+        trasposizione=7, programma_midi=60, famiglia="ottoni",
+        ruoli=["melodia", "controcanto", "armonia"],
+    ),
     "tromba": Strumento(
         chiave="tromba", nome="Tromba in Sib", abbrev="Tr.",
         estensione={"1a Media": (58, 72), "2a Media": (56, 77), "3a Media": (54, 82)},
@@ -123,7 +135,7 @@ REGISTRO: Dict[str, Strumento] = {
 }
 
 ORDINE_PARTITURA = [
-    "flauto", "clarinetto", "sax", "tromba", "percussioni", "glockenspiel",
+    "flauto", "clarinetto", "sax", "corno", "tromba", "percussioni", "glockenspiel",
     "metallofono", "pianoforte", "chitarra", "violino", "violoncello",
 ]
 

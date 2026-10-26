@@ -6,3 +6,9 @@ output/
 tmp_smim/
 tests/_out/
 .streamlit/secrets.toml
+.venv312/
+_vecchio_v0.7.2/
+separated/
+.DS_Store
+prova_omr/
+.claude/

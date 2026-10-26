@@ -515,12 +515,19 @@ AMBITO_MANI = {1: (55, 96), 2: (28, 64)}
 
 
 def filtro_mani(part: Partitura) -> None:
-    """Tiene ogni mano del pianoforte nel proprio registro."""
+    """
+    Tiene ogni mano del pianoforte nel proprio registro.
+
+    Il materiale copiato dall'originale (`letterale`) non si tocca: se il
+    pianista ha scritto un Fa4 alla sinistra (Cinema Paradiso) o un Re3 alla
+    destra (Dune), e' la sua scrittura, e riportarlo d'ottava spezza la
+    figura. I limiti valgono per cio' che genera il motore.
+    """
     for p in part.parti:
         if p.righi != 2:
             continue
         for e in p.eventi:
-            if e.pausa:
+            if e.pausa or e.letterale:
                 continue
             lo, hi = AMBITO_MANI.get(e.rigo, (21, 108))
             nuove = []
@@ -575,7 +582,13 @@ def filtro_divisi(part: Partitura) -> None:
             L_sotto = livello_parte(sotto.livello, part.livello)
             lo, hi = st.ambito(nome_livello_parte(sotto.livello,
                                                   part.livello))
-            _sotto_il_compagno(part, sotto, sopra, lo, hi)
+            # Pianoforte 1 e 2 sono due strumenti distinti: possono
+            # incrociarsi, conta solo che non si incrocino le mani dello
+            # stesso pianoforte (filtro_incroci). Confrontati, la destra del
+            # secondo finiva schiacciata su una nota ribattuta sotto la cima
+            # del primo.
+            if st.chiave != "pianoforte":
+                _sotto_il_compagno(part, sotto, sopra, lo, hi)
             if sotto.ruolo != "melodia":
                 _semplifica_ritmo(part, sotto, L_sotto.durata_minima * 2)
 

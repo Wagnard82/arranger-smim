@@ -15,8 +15,8 @@ from typing import Dict
 TESTI: Dict[str, Dict[str, str]] = {
     # ------------------------------------------------------------ intestazione
     "lingua": {"it": "🌐 Lingua / Language", "en": "🌐 Language / Lingua"},
-    "titolo": {"it": "🎼 Arranger SMIM · v{versione}, {compilato}",
-               "en": "🎼 Arranger SMIM · v{versione}, {compilato}"},
+    "titolo": {"it": "🎼 ScoreCraft Edu · v{versione}, {compilato}",
+               "en": "🎼 ScoreCraft Edu · v{versione}, {compilato}"},
     "sottotitolo": {
         "it": "Da uno spartito per pianoforte a una partitura per orchestra "
               "scolastica, con controllo automatico dei limiti didattici.",

@@ -100,6 +100,7 @@ _STRUMENTI_EN = {
     "flauto": ("Flute", "Fl."),
     "clarinetto": ("Clarinet in Bb", "Cl."),
     "sax": ("Alto Sax", "A. Sax"),
+    "corno": ("Horn in F", "Hn."),
     "tromba": ("Trumpet in Bb", "Tpt."),
     "violino": ("Violin", "Vln."),
     "violoncello": ("Cello", "Vc."),

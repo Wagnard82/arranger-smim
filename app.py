@@ -1,5 +1,5 @@
 """
-Arranger SMIM - interfaccia Streamlit (versione pubblica), italiano/inglese.
+ScoreCraft Edu (ex Arranger SMIM) - interfaccia Streamlit (versione pubblica), italiano/inglese.
 
     streamlit run app.py
 
@@ -24,7 +24,7 @@ from urllib.parse import quote
 import streamlit as st
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="Arranger SMIM", page_icon="🎼", layout="wide")
+st.set_page_config(page_title="ScoreCraft Edu", page_icon="🎼", layout="wide")
 
 # --------------------------------------------------------------------------
 # Controllo dei file PRIMA di importare il motore.
@@ -133,7 +133,7 @@ def valore(widget, nome: str, etichetta: str, predefinito, **kw):
 # sul server e' di un'altra versione — succede caricando su GitHub solo una
 # parte dei file — l'app non deve partire con un errore incomprensibile a
 # meta' esecuzione, ma dire subito che cosa manca.
-VERSIONE_INTERFACCIA = "0.9.5"
+VERSIONE_INTERFACCIA = "0.9.6"
 if VERSIONE != VERSIONE_INTERFACCIA:
     st.error(T("file_non_allineati", ui=VERSIONE_INTERFACCIA, motore=VERSIONE))
     st.stop()
@@ -196,7 +196,7 @@ def invia_feedback(nome: str, email: str, categoria: str, messaggio: str,
 
 def link_mailto(nome: str, email: str, categoria: str, messaggio: str) -> str:
     corpo = quote(f"Nome: {nome}\nEmail: {email}\n\n{messaggio}")
-    oggetto = quote(f"[Arranger SMIM] [{lng.upper()}] {categoria}")
+    oggetto = quote(f"[ScoreCraft Edu] [{lng.upper()}] {categoria}")
     return f"mailto:{DESTINATARIO}?subject={oggetto}&body={corpo}"
 
 
@@ -634,5 +634,5 @@ with PRINCIPALE:
                 st.info(T("allega_a_mano"))
                 st.download_button(T("scarica_allegati"),
                                    FB.zip_allegati(allegati),
-                                   file_name="arranger_smim_feedback.zip",
+                                   file_name="scorecraft_edu_feedback.zip",
                                    mime="application/zip")

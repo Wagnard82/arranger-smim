@@ -10,17 +10,68 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple
 
-VERSIONE = "0.9.5"
+VERSIONE = "0.9.6"
 DATA = "ottobre 2026"
 DATA_EN = "October 2026"
-PRECEDENTE = "0.9.4"
+PRECEDENTE = "0.9.5"
 
 # Marca temporale del pacchetto: serve a capire a colpo d'occhio QUALE copia
 # del progetto sta girando, quando ne esistono piu' d'una sul disco.
-COMPILATO = "18 ottobre 2026 ore 21.15"
+COMPILATO = "26 ottobre 2026 ore 17.31"
 
 # (titolo della sezione, [voci])
 NOVITA: List[Tuple[str, List[str]]] = [
+    ("Nuovo nome: ScoreCraft Edu", [
+        "Arranger SMIM diventa ScoreCraft Edu. Cambiano il titolo "
+        "dell'app, la firma nel MusicXML e nel sorgente LilyPond e "
+        "l'oggetto delle mail di feedback; la musica prodotta e' la stessa.",
+    ]),
+    ("Corno in Fa (nuovo)", [
+        "Il corno in Fa entra nell'organico: parte trasposta una quinta "
+        "sopra, armatura corretta, respiri come gli altri fiati. Nella "
+        "distribuzione dei ruoli e' indicato soprattutto per controcanto e "
+        "armonia.",
+        "Le estensioni per livello sono una prima proposta (1a media "
+        "scritto Do4-Do5, 2a Sol3-Mi5, 3a Fa3-Sol5) e verranno rifinite.",
+    ]),
+    ("Pianoforte: ogni mano al suo posto", [
+        "Quando il pianoforte suonava il basso, la linea finiva anche nella "
+        "mano destra, alzata di due o tre ottave: un basso doppio, con "
+        "l'avviso [Mani] quasi a ogni battuta (lead sheet dell'Inno alla "
+        "gioia, Dune). Ora il basso sta nella sinistra e la destra "
+        "accompagna.",
+        "Accordi e arpeggi inventati per la destra nascono sopra il Sol3, "
+        "invece di essere riportati su una nota alla volta (accordi "
+        "rovesciati). Anche la levigatura delle ottave rispetta il registro "
+        "di ciascuna mano.",
+        "Le note copiate dalla scrittura originale non vengono piu' "
+        "spostate d'ottava: un Fa4 scritto alla sinistra resta un Fa4.",
+        "Una melodia grave affidata al pianoforte sale nella destra tutta "
+        "insieme, di un'ottava, senza spezzarne il profilo.",
+        "Il basso inventato per la sinistra resta entro il Mi3 e non "
+        "incrocia piu' gli accordi della destra.",
+        "Stile Cinematico: l'arpeggio della destra parte sopra la sinistra "
+        "originale. Gli incroci delle mani nelle prove su tutto il "
+        "repertorio sono passati da oltre 800 a 24.",
+    ]),
+    ("Due pianoforti indipendenti", [
+        "Pianoforte 1 e 2 sono due strumenti distinti: il secondo puo' "
+        "suonare sopra il primo. Prima veniva schiacciato sotto la sua nota "
+        "piu' acuta e gli arpeggi diventavano una nota ribattuta. Resta la "
+        "regola dei valori piu' larghi per il secondo pianoforte.",
+    ]),
+    ("Melodia scritta sempre al suo posto", [
+        "Negli spartiti voce + pianoforte e nei lead sheet la melodia "
+        "scritta viene sempre affidata agli strumenti. Prima, se la voce "
+        "taceva a lungo (introduzione, pause fra le frasi), il brano veniva "
+        "orchestrato per registri senza nessun solista (Let It Be).",
+    ]),
+    ("Travature per Dorico", [
+        "Il MusicXML ora contiene le travature: in Dorico le crome "
+        "comparivano tutte separate (MuseScore le ricalcolava da solo). Si "
+        "trava per movimento, a gruppi di quattro crome in 4/4 e di tre "
+        "in 6/8.",
+    ]),
     ("Controllo dei file all'avvio, piu' preciso", [
         "Aggiornando il repository solo in parte, l'app si fermava con un "
         "ImportError incomprensibile (es. «from arranger.esportatore import "
@@ -347,6 +398,39 @@ def riepilogo() -> Dict[str, int]:
 # Per l'interfaccia inglese: solo le novita' rilevanti per chi la usa da
 # fuori Italia. Lo storico completo resta in italiano qui sopra.
 NOVITA_EN: List[Tuple[str, List[str]]] = [
+    ("New name: ScoreCraft Edu", [
+        "Arranger SMIM is now ScoreCraft Edu: new app title, new signature "
+        "in the MusicXML and LilyPond files. The music is the same.",
+    ]),
+    ("Horn in F (new)", [
+        "The horn in F joins the ensemble: transposed part, correct key "
+        "signature, breathing like the other winds. It is mainly cast for "
+        "countermelody and harmony. Ranges per grade are a first proposal.",
+    ]),
+    ("Piano: each hand in its place", [
+        "When the piano played the bass, the bass line was also written in "
+        "the right hand, two or three octaves up. Now the bass stays in the "
+        "left hand and the right hand accompanies.",
+        "Invented chords and arpeggios for the right hand start above G3, "
+        "notes copied from the original are no longer moved, and a low "
+        "melody moves up into the right hand as a whole.",
+        "Cinematic style: the right-hand arpeggio now sits above the "
+        "original left hand. Hand crossings across all test pieces dropped "
+        "from over 800 to 24.",
+    ]),
+    ("Two independent pianos", [
+        "Piano 1 and 2 are separate instruments: the second may play above "
+        "the first instead of being squashed under it.",
+    ]),
+    ("Written melody always used", [
+        "In voice + piano scores and lead sheets the written melody is "
+        "always given to the instruments, even when the voice rests for a "
+        "long time.",
+    ]),
+    ("Beaming for Dorico", [
+        "The MusicXML now contains beams: in Dorico all eighth notes used "
+        "to appear unbeamed.",
+    ]),
     ("Feedback with attachments (new)", [
         "The feedback form can attach the piece from the last arrangement, "
         "together with the settings used, the generated score and the "
