@@ -39,6 +39,8 @@ singoli docenti.
   `github.com/Wagnard82/arranger-smim` (ramo `main`, remoto via SSH con la
   chiave del Mac). Il deploy è su Streamlit Community Cloud da quel
   repository. La storia remota (caricamenti dal sito) è conservata.
+  Il repository è **privato** dal 27/10/2026, contro le fughe di codice
+  (prima era pubblico: 77 clonazioni in 14 giorni).
 
 ## Ambiente
 
@@ -199,7 +201,10 @@ Pipeline: **ingestione → analizzatore → orchestratore → vincoli → esport
    scarichi o installi nulla; tutto ciò che serve si installa sul server al
    deploy. Motore scelto: Audiveris 5.11 (AGPL v3), con i dati OCR di
    Tesseract per le sigle. Prova locale: ottimo sui PDF puliti, debole
-   sulle scansioni e sulle sigle jazz. Resta da fare la prova sul server
-   Streamlit Cloud (memoria e tempi). Rimandato alla settimana dopo il
-   26/10/2026.
+   sulle scansioni e sulle sigle jazz. Il 27/10/2026 è nato il progetto
+   separato **ScoreCraft OMR** (`~/scorecraft_omr`, repository privato
+   `github.com/Wagnard82/scorecraft-omr`): solo PDF → MusicXML, in prova
+   riservata ad alcuni colleghi. Riconoscimento confermato funzionante su
+   Streamlit Cloud il 27/10/2026. Resta da misurare memoria e tempi sui PDF
+   lunghi, poi decidere come collegarlo all'arrangiatore.
 8. Corno: le estensioni per livello sono una stima; da confermare.
