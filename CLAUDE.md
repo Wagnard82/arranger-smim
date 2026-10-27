@@ -179,8 +179,9 @@ Pipeline: **ingestione → analizzatore → orchestratore → vincoli → esport
 
 1. ~~Collegare `~/arranger_smim` al repository GitHub~~: fatto il
    27/10/2026, 0.9.6 pubblicata (commit `706f043`).
-2. Verificare su Streamlit Cloud che la 0.9.6 parta (titolo «ScoreCraft
-   Edu · v0.9.6») e che la mail di feedback arrivi con gli allegati.
+2. Su Streamlit Cloud la 0.9.6 parte e mostra «ScoreCraft Edu · v0.9.6»
+   (confermato dall'utente il 27/10/2026). Resta da verificare che la mail
+   di feedback arrivi con gli allegati.
 3. ~~Test dell'arrangiatore su repertorio reale~~: fatto per la 0.9.6
    (Cinema Paradiso, Dune, Can't Help Falling in Love, Let It Be).
 4. ~~Avviso «[Mani]» sul lead sheet dell'Inno alla gioia~~: risolto nella
