@@ -34,10 +34,11 @@ singoli docenti.
 - La cartella locale `~/arranger_smim` è stata riallineata alla 0.9.5 il
   22/10/2026. I file della vecchia v0.7.2, compresi quelli della pipeline
   audio, sono archiviati in `_vecchio_v0.7.2/`. **Non sono codice attivo:**
-  non leggerli né importarli come riferimento. La cartella **non è ancora
-  un repository git**.
-- Il deploy è su Streamlit Community Cloud, dal repository GitHub
-  `arranger-smim`. *Da verificare:* dove sta il clone git locale.
+  non leggerli né importarli come riferimento.
+- Dal 27/10/2026 `~/arranger_smim` **è il clone git** del repository
+  `github.com/Wagnard82/arranger-smim` (ramo `main`, remoto via SSH con la
+  chiave del Mac). Il deploy è su Streamlit Community Cloud da quel
+  repository. La storia remota (caricamenti dal sito) è conservata.
 
 ## Ambiente
 
@@ -176,10 +177,10 @@ Pipeline: **ingestione → analizzatore → orchestratore → vincoli → esport
 
 ## Prossimi passi
 
-1. Collegare `~/arranger_smim` al repository GitHub `arranger-smim`,
-   clonandolo o con `git init` + `remote`, senza perdere la storia remota.
-2. Verificare su Streamlit Cloud che la 0.9.5 parta e che la mail di feedback
-   arrivi con gli allegati.
+1. ~~Collegare `~/arranger_smim` al repository GitHub~~: fatto il
+   27/10/2026, 0.9.6 pubblicata (commit `706f043`).
+2. Verificare su Streamlit Cloud che la 0.9.6 parta (titolo «ScoreCraft
+   Edu · v0.9.6») e che la mail di feedback arrivi con gli allegati.
 3. ~~Test dell'arrangiatore su repertorio reale~~: fatto per la 0.9.6
    (Cinema Paradiso, Dune, Can't Help Falling in Love, Let It Be).
 4. ~~Avviso «[Mani]» sul lead sheet dell'Inno alla gioia~~: risolto nella
