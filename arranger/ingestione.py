@@ -26,11 +26,13 @@ resta cosi' testabile e installabile ovunque.
 from __future__ import annotations
 
 import os
+import re
 import zipfile
+from dataclasses import fields
 from typing import Dict, List, Optional, Tuple
 from xml.etree import ElementTree as ET
 
-from .modello import Misura, Nota, Spartito
+from .modello import Misura, Nota, SegniRipresa, Spartito
 
 PASSI = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 
@@ -294,6 +296,126 @@ def _griglia_misure(parti: List[ET.Element]) -> List[Tuple[float, int, int, int,
     return [tuple(g) for g in griglia]
 
 
+# testi dei salti, normalizzati (minuscole, solo lettere e cifre):
+# prefisso -> salto, resto ammesso -> destinazione
+_SALTI = (("dalsegno", "ds"), ("dacapo", "dc"), ("ds", "ds"), ("dc", "dc"))
+_VERSO = {"": "", "alcoda": "coda", "allacoda": "coda", "alfine": "fine"}
+_AL_CODA = {"tocoda", "alcoda", "vaiallacoda"}
+
+
+def _normalizza(testo: str) -> str:
+    return "".join(c for c in testo.lower() if c.isalnum())
+
+
+def _leggi_testo_ripresa(testo: str, s: SegniRipresa) -> None:
+    """Riconosce nel testo di una <words> un segno di ripresa."""
+    t = _normalizza(testo)
+    if not t:
+        return
+    for prefisso, salto in _SALTI:
+        if t.startswith(prefisso) and t[len(prefisso):] in _VERSO:
+            s.salto = salto
+            s.salto_verso = _VERSO[t[len(prefisso):]]
+            s.testo_salto = testo.strip()
+            return
+    if t in _AL_CODA:
+        s.al_coda = True
+    elif t == "fine":
+        s.fine = True
+    elif t == "coda":
+        s.coda = True
+
+
+def _leggi_suono_ripresa(suono: ET.Element, s: SegniRipresa) -> None:
+    """I salti scritti come attributi di <sound> (MuseScore, Dorico)."""
+    if suono.get("segno"):
+        s.segno = True
+    if suono.get("coda"):
+        s.coda = True
+    if suono.get("tocoda"):
+        s.al_coda = True
+    if suono.get("fine"):
+        s.fine = True
+    if suono.get("dalsegno") and not s.salto:
+        s.salto = "ds"
+    if suono.get("dacapo") == "yes" and not s.salto:
+        s.salto = "dc"
+
+
+def _unisci_segni(a: SegniRipresa, b: SegniRipresa) -> None:
+    """Porta in `a` i segni di `b` che `a` non ha: basta una parte."""
+    for f in fields(SegniRipresa):
+        if not getattr(a, f.name) and getattr(b, f.name):
+            setattr(a, f.name, getattr(b, f.name))
+
+
+def _segni_ripresa(parti: List[ET.Element]) -> Dict[int, SegniRipresa]:
+    """
+    Ritornelli, volte, Segno, Coda e salti per indice di misura.
+
+    I programmi di notazione li scrivono in modi diversi: stanghette con
+    <repeat> ed <ending>, simboli <segno/> e <coda/>, testi («D.S. al Coda»,
+    «Fine») e attributi di <sound>. Si leggono tutti, da tutte le parti, e
+    si uniscono: MuseScore, per esempio, mette i testi solo sul rigo
+    superiore.
+    """
+    segni: Dict[int, SegniRipresa] = {}
+    for parte in parti:
+        volte_aperte: Tuple[int, ...] = ()
+        for m_idx, mis in enumerate(parte.findall("./{*}measure")):
+            s = SegniRipresa()
+            for barra in mis.findall("./{*}barline"):
+                lato = barra.get("location", "right")
+                rip = barra.find("./{*}repeat")
+                if rip is not None:
+                    if rip.get("direction") == "forward":
+                        s.ritornello_inizio = True
+                    elif rip.get("direction") == "backward":
+                        try:
+                            s.ritornello_fine = max(2, int(rip.get("times", "2")))
+                        except ValueError:
+                            s.ritornello_fine = 2
+                fin = barra.find("./{*}ending")
+                if fin is not None:
+                    numeri = tuple(int(x) for x in re.findall(r"\d+", fin.get("number", "")))
+                    tipo = fin.get("type", "")
+                    if tipo == "start" and lato == "left":
+                        volte_aperte = numeri or (1,)
+                        s.volta_apre = True
+                    elif tipo in ("stop", "discontinue"):
+                        s.volte = s.volte or volte_aperte or numeri
+                        s.volta_chiude = tipo
+            if volte_aperte:
+                s.volte = s.volte or volte_aperte
+            if s.volta_chiude:
+                volte_aperte = ()
+            for el in mis.iter():
+                tag = _tag(el)
+                if tag == "segno":
+                    s.segno = True
+                elif tag == "coda":
+                    s.coda = True
+                elif tag == "words" and el.text:
+                    _leggi_testo_ripresa(el.text, s)
+                elif tag == "sound":
+                    _leggi_suono_ripresa(el, s)
+            if s.vuoti:
+                continue
+            if m_idx in segni:
+                _unisci_segni(segni[m_idx], s)
+            else:
+                segni[m_idx] = s
+
+    # Un salto scritto solo come <sound> non dice dove finisce: si ricava
+    # dal resto del brano (c'e' un «To Coda»? c'e' un Fine?)
+    ha_coda = any(s.al_coda for s in segni.values())
+    ha_fine = any(s.fine for s in segni.values())
+    for s in segni.values():
+        if s.salto and not s.testo_salto and not s.salto_verso:
+            s.salto_verso = "coda" if ha_coda else ("fine" if ha_fine else "")
+    return segni
+
+
 def da_musicxml(percorso: str) -> Spartito:
     radice = _leggi_xml(percorso)
     if _tag(radice) == "score-timewise":
@@ -328,6 +450,9 @@ def da_musicxml(percorso: str) -> Spartito:
             numero = numero_logico
         misure.append(Misura(numero=numero, inizio=inizi[i], durata=durata,
                              num=num, den=den, tonalita=fifths, anacrusi=anacrusi))
+    for i, segni in _segni_ripresa(parti).items():
+        if i < len(misure):
+            misure[i].ripresa = segni
 
     tutte: List[Nota] = []
     dinamiche: List[Tuple[float, str]] = []

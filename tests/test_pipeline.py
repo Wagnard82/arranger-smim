@@ -3621,6 +3621,62 @@ def test_manifesto_file():
     verifica(app.index("_cf.differenze()") < app.index("from arranger import"),
              "app.py importa il motore prima del controllo dei file")
 
+# --------------------------------------------------------------------------
+# Segni di ripresa: ritornelli, volte, D.S., D.C., Coda, Fine
+# --------------------------------------------------------------------------
+
+
+def prepara_ripresa(inno):
+    """Genera gli esempi con i segni di ripresa: nome -> percorso."""
+    d = os.path.join(os.path.dirname(QUI), "esempi")
+    es = {"inno": inno}
+    for nome in ("ritornello", "volte", "ds_al_coda", "dc_al_fine",
+                 "ritornello_levare"):
+        es[nome] = getattr(genera_esempi, nome)(os.path.join(d, nome + ".xml"))
+    es["volte_doppio"] = genera_esempi.volte(os.path.join(d, "volte_doppio.xml"),
+                                             doppio=True)
+    return es
+
+
+def test_lettura_segni_ripresa(es):
+    """I segni di ripresa arrivano nelle misure giuste da tutti i canali:
+    stanghette, simboli, testi e <sound>."""
+    sp = ingestione.ingerisci(es["ritornello"])
+    r = [m.ripresa for m in sp.misure]
+    verifica(r[2].ritornello_inizio and r[5].ritornello_fine == 2, "ritornello m3-m6")
+    verifica(sum(not x.vuoti for x in r) == 2, "solo due misure con segni")
+
+    r = [m.ripresa for m in ingestione.ingerisci(es["volte"]).misure]
+    verifica(r[4].volte == (1,) and r[4].volta_apre and r[4].volta_chiude == "stop",
+             f"1a volta: {r[4]}")
+    verifica(r[5].volte == (2,) and r[5].volta_chiude == "discontinue",
+             f"2a volta: {r[5]}")
+
+    r = [m.ripresa for m in ingestione.ingerisci(es["ds_al_coda"]).misure]
+    verifica(r[2].segno and r[4].coda and r[4].al_coda and r[7].coda,
+             "segno e code")
+    verifica((r[6].salto, r[6].salto_verso, r[6].testo_salto)
+             == ("ds", "coda", "D.S. al Coda"),
+             f"D.S. al Coda dai words, anche se il violino non lo porta: {r[6]}")
+
+    r = [m.ripresa for m in ingestione.ingerisci(es["dc_al_fine"]).misure]
+    verifica(r[3].fine and (r[5].salto, r[5].salto_verso) == ("dc", "fine"),
+             f"D.C. al Fine dai soli <sound>: {r[3]} {r[5]}")
+
+    r = [m.ripresa for m in ingestione.ingerisci(es["volte_doppio"]).misure]
+    verifica(r[6].salto == "ds" and r[6].salto_verso == "" and r[2].segno,
+             f"words + sound = un salto solo: {r[6]}")
+
+    sp = ingestione.ingerisci(es["ritornello_levare"])
+    verifica([m.durata for m in sp.misure] == [1.0, 4.0, 4.0, 3.0],
+             f"durate col levare: {[m.durata for m in sp.misure]}")
+    verifica(sp.misure[0].ripresa.ritornello_inizio
+             and sp.misure[3].ripresa.ritornello_fine == 2, "ritornello sull'anacrusi")
+
+    sp = ingestione.ingerisci(es["inno"])
+    verifica(all(m.ripresa.vuoti for m in sp.misure), "inno: nessun segno")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -3642,6 +3698,8 @@ if __name__ == "__main__":
     (inno, basso, sei_ottavi, migra, pause, scale, ritmico, arpeggiata,
      seconda, inciso, canzone, intro, arpeggiata_mel, sotto_accordi,
      sigle_68, voce_piano) = prepara()
+    es = prepara_ripresa(inno)
+    test_lettura_segni_ripresa(es)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

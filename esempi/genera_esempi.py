@@ -755,6 +755,156 @@ def lead_sheet(percorso):
     return percorso
 
 
+# --------------------------------------------------------------------------
+# Segni di ripresa
+# --------------------------------------------------------------------------
+
+
+def _stanghetta(lato, ripeti=None, volta=None, tipo_volta=None, volte_n=None):
+    r = [f'      <barline location="{lato}">']
+    if ripeti == "forward":
+        r.append("        <bar-style>heavy-light</bar-style>")
+    elif ripeti == "backward":
+        r.append("        <bar-style>light-heavy</bar-style>")
+    if volta:
+        r.append(f'        <ending number="{volta}" type="{tipo_volta}"/>')
+    if ripeti:
+        extra = f' times="{volte_n}"' if volte_n else ""
+        r.append(f'        <repeat direction="{ripeti}"{extra}/>')
+    r.append("      </barline>")
+    return r
+
+
+def _direzione(*contenuto, suono=None):
+    r = ['      <direction placement="above">']
+    for c in contenuto:
+        r.append(f"        <direction-type>{c}</direction-type>")
+    if suono:
+        r.append(f"        <sound {suono}/>")
+    r.append("      </direction>")
+    return r
+
+
+def _brano_ripresa(percorso, titolo, segni, quarti=None, seconda_parte=False):
+    """
+    Melodia a quarti su un rigo, una misura per voce di `segni`.
+    Ogni voce e' un dizionario con le righe da mettere all'inizio
+    ("inizio") e alla fine ("fine") della misura; `quarti` da' la durata
+    di ogni misura (4 di default, meno per anacrusi e chiusure tronche).
+    La seconda parte, se c'e', porta solo stanghette e pause: i testi e i
+    simboli restano nella prima, come fa MuseScore.
+    """
+    n = len(segni)
+    quarti = quarti or [4] * n
+    parti = [("P1", "Flauto")] + ([("P2", "Violino")] if seconda_parte else [])
+    righe = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" '
+        '"http://www.musicxml.org/dtds/partwise.dtd">',
+        '<score-partwise version="4.0">',
+        f"  <work><work-title>{titolo}</work-title></work>",
+        "  <part-list>",
+    ]
+    for pid, nome in parti:
+        righe.append(f'    <score-part id="{pid}"><part-name>{nome}</part-name></score-part>')
+    righe.append("  </part-list>")
+    scala = [60, 62, 64, 65, 67, 69, 71, 72]
+    for k, (pid, _nome) in enumerate(parti):
+        righe.append(f'  <part id="{pid}">')
+        numero = 0 if quarti[0] < 4 else 1
+        for i, segno in enumerate(segni):
+            implicito = ' implicit="yes"' if i == 0 and quarti[0] < 4 else ""
+            righe.append(f'    <measure number="{numero}"{implicito}>')
+            numero += 1
+            if i == 0:
+                righe += ["      <attributes>",
+                          f"        <divisions>{DIV}</divisions>",
+                          "        <key><fifths>0</fifths></key>",
+                          "        <time><beats>4</beats><beat-type>4</beat-type></time>",
+                          "        <clef><sign>G</sign><line>2</line></clef>",
+                          "      </attributes>"]
+            righe += [r for r in segno.get("barra_inizio", [])]
+            if k == 0:
+                righe += segno.get("inizio", [])
+            for q in range(quarti[i]):
+                if k == 0:
+                    nota = _nota(scala[(i + q) % len(scala)], 1, 1, 1)
+                else:
+                    nota = _nota(0, 1, 1, 1, pausa=True)
+                righe += [r for r in nota if "<staff>" not in r]
+            if k == 0:
+                righe += segno.get("fine", [])
+            righe += segno.get("barra_fine", [])
+            righe.append("    </measure>")
+        righe.append("  </part>")
+    righe.append("</score-partwise>")
+    _scrivi(percorso, righe)
+    return percorso
+
+
+def ritornello(percorso):
+    """8 misure, ritornello da m3 a m6: si suonano 1-6, 3-6, 7-8."""
+    segni = [{} for _ in range(8)]
+    segni[2] = {"barra_inizio": _stanghetta("left", "forward")}
+    segni[5] = {"barra_fine": _stanghetta("right", "backward")}
+    return _brano_ripresa(percorso, "Ritornello", segni)
+
+
+def volte(percorso, doppio=False):
+    """
+    Ritornello da m1 con 1a volta (m5) e 2a volta (m6), poi m7.
+    Con `doppio` aggiunge un Segno a m3 e un D.S. a m7 scritto due volte,
+    come testo e come <sound>: deve valere un salto solo.
+    """
+    segni = [{} for _ in range(7)]
+    segni[0] = {"barra_inizio": _stanghetta("left", "forward")}
+    segni[4] = {"barra_inizio": _stanghetta("left", volta="1", tipo_volta="start"),
+                "barra_fine": _stanghetta("right", "backward", "1", "stop")}
+    segni[5] = {"barra_inizio": _stanghetta("left", volta="2", tipo_volta="start"),
+                "barra_fine": _stanghetta("right", volta="2",
+                                          tipo_volta="discontinue")}
+    if doppio:
+        segni[2]["inizio"] = _direzione("<segno/>", suono='segno="s1"')
+        segni[6]["fine"] = _direzione("<words>D.S.</words>", suono='dalsegno="s1"')
+    return _brano_ripresa(percorso, "Volte", segni)
+
+
+def ds_al_coda(percorso):
+    """
+    Segno a m3, «To Coda» a m5 (col simbolo di Coda, come in Dorico e
+    MuseScore), «D.S. al Coda» a m7, Coda a m8. Solo testi e simboli,
+    niente <sound>: e' come esporta Sibelius. Il violino non porta
+    direzioni. Si suonano 1-7, 3-5, 8-9.
+    """
+    segni = [{} for _ in range(9)]
+    segni[2] = {"inizio": _direzione("<segno/>")}
+    segni[4] = {"inizio": _direzione("<coda/>"),
+                "fine": _direzione("<words>To Coda</words>")}
+    segni[6] = {"fine": _direzione("<words>D.S. al Coda</words>")}
+    segni[7] = {"inizio": _direzione("<coda/>")}
+    return _brano_ripresa(percorso, "D.S. al Coda", segni, seconda_parte=True)
+
+
+def dc_al_fine(percorso):
+    """Fine a m4, D.C. al Fine a m6, scritti solo come <sound>."""
+    segni = [{} for _ in range(6)]
+    segni[3] = {"fine": ['      <sound fine="yes"/>']}
+    segni[5] = {"fine": ['      <sound dacapo="yes"/>']}
+    return _brano_ripresa(percorso, "D.C. al Fine", segni)
+
+
+def ritornello_levare(percorso):
+    """
+    Ritornello che parte dall'anacrusi (1 quarto) e chiude sull'ultima
+    misura tronca (3 quarti): le durate delle misure vanno conservate.
+    """
+    segni = [{} for _ in range(4)]
+    segni[0] = {"barra_inizio": _stanghetta("left", "forward")}
+    segni[3] = {"barra_fine": _stanghetta("right", "backward")}
+    return _brano_ripresa(percorso, "Ritornello in levare", segni,
+                          quarti=[1, 4, 4, 3])
+
+
 if __name__ == "__main__":
     qui = os.path.dirname(os.path.abspath(__file__))
     print(inno_alla_gioia(os.path.join(qui, "inno_alla_gioia.xml")))
@@ -775,3 +925,9 @@ if __name__ == "__main__":
     print(con_sigle_e_sei_ottavi(os.path.join(qui, "sigle_sei_ottavi.xml")))
     print(voce_e_pianoforte(os.path.join(qui, "voce_e_piano.xml")))
     print(lead_sheet(os.path.join(qui, "lead_sheet.xml")))
+    print(ritornello(os.path.join(qui, "ritornello.xml")))
+    print(volte(os.path.join(qui, "volte.xml")))
+    print(volte(os.path.join(qui, "volte_doppio.xml"), doppio=True))
+    print(ds_al_coda(os.path.join(qui, "ds_al_coda.xml")))
+    print(dc_al_fine(os.path.join(qui, "dc_al_fine.xml")))
+    print(ritornello_levare(os.path.join(qui, "ritornello_levare.xml")))

@@ -58,6 +58,33 @@ class Nota:
 
 
 @dataclass
+class SegniRipresa:
+    """
+    Segni di ripresa di una misura, come scritti nell'originale: ritornelli,
+    volte, Segno, Coda, salti. Si arrangia la forma scritta, una volta sola;
+    l'ordine in cui le misure si suonano lo calcola `ripetizioni`.
+    """
+
+    ritornello_inizio: bool = False    # |: sulla stanghetta sinistra
+    ritornello_fine: int = 0           # :| sulla destra; esecuzioni totali (times, 2 di default)
+    volte: Tuple[int, ...] = ()        # volte a cui appartiene la misura: (1,), (2,), (1, 2)
+    volta_apre: bool = False           # la parentesi della volta comincia qui
+    volta_chiude: str = ""             # "stop" (con gancio), "discontinue" (aperta), "" se continua
+    segno: bool = False                # Segno all'inizio della misura
+    coda: bool = False                 # simbolo di Coda all'inizio della misura
+    al_coda: bool = False              # «To Coda» alla fine della misura
+    fine: bool = False                 # «Fine» alla fine della misura
+    salto: str = ""                    # "ds" o "dc" alla fine della misura
+    salto_verso: str = ""              # "coda", "fine" o "" (D.S./D.C. semplice)
+    testo_salto: str = ""              # il testo come scritto, per riscriverlo uguale
+
+    @property
+    def vuoti(self) -> bool:
+        """True se la misura non porta nessun segno di ripresa."""
+        return self == SegniRipresa()
+
+
+@dataclass
 class Misura:
     """Contenitore metrico. `durata` puo' essere ridotta in caso di anacrusi."""
 
@@ -68,6 +95,7 @@ class Misura:
     den: int = 4           # denominatore
     tonalita: int = 0      # circolo delle quinte (fifths), -7..+7
     anacrusi: bool = False
+    ripresa: SegniRipresa = field(default_factory=SegniRipresa)
 
     @property
     def fine(self) -> float:
