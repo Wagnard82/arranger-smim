@@ -218,6 +218,16 @@ def _sensibile_che_sale(note: List[Nota], sensibile: int) -> bool:
     return False
 
 
+# accordi presi in prestito dal modo parallelo, tipici del pop e del rock
+# (I-bVII-IV misolidio, bVI-bVII-I eolio): entrano solo se la melodia porta
+# la nota che li distingue, cioe' la loro fondamentale abbassata
+_MODALI = {"maggiore": ((10, "bVII"), (8, "bVI")), "minore": ()}
+
+
+def _nota_presente(note: List[Nota], pc: int, minimo: float = 0.5) -> bool:
+    return sum(n.durata for n in note if n.midi % 12 == pc) >= minimo - 1e-6
+
+
 def candidati(tonica: int, modo: str, note: List[Nota]) -> List[Candidato]:
     """
     Gli accordi fra cui scegliere. Le dominanti secondarie entrano solo se
@@ -226,6 +236,9 @@ def candidati(tonica: int, modo: str, note: List[Nota]) -> List[Candidato]:
     """
     fuori = [Candidato((tonica + d) % 12, q, g)
              for d, q, g in _DIATONICI[modo]]
+    for d, grado in _MODALI[modo]:
+        if _nota_presente(note, (tonica + d) % 12):
+            fuori.append(Candidato((tonica + d) % 12, "maj", grado))
     for grado, d, triade in _SECONDARIE[modo]:
         radice = (tonica + d + 7) % 12
         if not _sensibile_che_sale(note, (radice + 4) % 12):
@@ -321,8 +334,27 @@ def _base(grado: str) -> str:
     return "V" if grado == "V7" else grado
 
 
+# Strato pop/modale (osservazione del docente, 2/11/2026): le progressioni
+# pop stanno piu' vicino alla musica modale che alla tonale di Piston.
+# Queste successioni sono normali nel pop anche quando la tavola tonale le
+# dice rare: retrogressione V-IV, cadenza plagale IV-I, i giri I-V-vi-IV,
+# vi-IV-I-V, I-vi-IV-V, il misolidio I-bVII-IV, l'eolio bVI-bVII-I.
+POP: Dict[str, Set[Tuple[str, str]]] = {
+    "maggiore": {("I", "V"), ("V", "vi"), ("vi", "IV"), ("IV", "I"), ("I", "vi"),
+                 ("IV", "V"), ("V", "IV"), ("I", "IV"), ("V", "I"), ("vi", "V"),
+                 ("IV", "vi"), ("ii", "IV"), ("vi", "ii"), ("I", "bVII"),
+                 ("bVII", "IV"), ("bVII", "I"), ("IV", "bVII"), ("bVI", "bVII"),
+                 ("bVII", "bVI"), ("bVI", "IV")},
+    "minore": {("i", "VI"), ("VI", "III"), ("III", "VII"), ("VII", "i"),
+               ("i", "VII"), ("VII", "VI"), ("VI", "VII"), ("iv", "i"),
+               ("i", "iv"), ("VI", "iv"), ("i", "III"), ("iv", "VII")},
+}
+
+
 def costo_successione(da: Candidato, a: Candidato, modo: str, pesi: Pesi) -> float:
     """Costo della successione da -> a secondo la tavola (P6, P12)."""
+    if (_base(da.grado), _base(a.grado)) in POP[modo]:
+        return pesi.abituale
     if da.secondaria:
         # la dominante secondaria va al suo grado (V/V -> V), altro e' raro
         bersaglio = da.grado.split("/")[1]
@@ -392,7 +424,10 @@ def armonizza(sp: Spartito, melodia: List[Nota],
             continue
         ultima = finali[-1]
         grado = (ultima.midi - tonica) % 12
-        k = ultimo_tratto(b)
+        # la cadenza cade dove ATTACCA l'ultima nota della frase, non
+        # sull'ultimo tratto: su una tonica tenuta per tutta la misura il V
+        # va nel tratto prima, non sotto la tonica tenuta
+        k = min(ultimo_tratto(b), ultimo_tratto(ultima.inizio + 1e-3))
         ultima_frase = f == len(frasi) - 1
         premio = pesi.cadenza * (2.0 if ultima_frase else 1.0)
         if grado == 0 and (ultima.durata >= 1.0 - 1e-6 or ultima_frase):

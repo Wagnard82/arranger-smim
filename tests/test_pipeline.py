@@ -4414,6 +4414,33 @@ def test_armonia_in_piedi_frasi_uguali():
     verifica(fuori[-1].fondamentale == 0 and fuori[-1].inizio == 24, "cadenza finale intatta")
 
 
+def test_armonia_pop_modale():
+    """Lo strato pop/modale (osservazione del docente, 2/11/2026): nel pop
+    V-IV e IV-I sono normali, e bVII / bVI entrano se la melodia porta il
+    settimo / sesto grado abbassato."""
+    from arranger import armonizzazione as A
+    p = A.Pesi()
+    C = lambda r, q, g: A.Candidato(r, q, g)
+    V, IV, I, vi = C(7, "maj", "V"), C(5, "maj", "IV"), C(0, "maj", "I"), C(9, "min", "vi")
+    verifica(A.costo_successione(V, IV, "maggiore", p) == p.abituale, "V-IV normale nel pop")
+    verifica(A.costo_successione(IV, I, "maggiore", p) == p.abituale, "IV-I normale nel pop")
+    verifica(A.costo_successione(vi, IV, "maggiore", p) == p.abituale, "vi-IV normale nel pop")
+    N = lambda m, t, d: Nota(midi=m, inizio=t, durata=d)
+    con_sib = [N(67, 0, 1), N(70, 1, 2), N(65, 3, 1)]
+    gradi = lambda note: {c.grado for c in A.candidati(0, "maggiore", note)}
+    verifica("bVII" in gradi(con_sib), "Sib in melodia: bVII candidato")
+    verifica("bVII" not in gradi([N(67, 0, 1), N(71, 1, 2)]), "senza Sib: niente bVII")
+    verifica("bVI" in gradi([N(68, 0, 2), N(67, 2, 2)]), "Lab in melodia: bVI candidato")
+    d = os.path.join(os.path.dirname(QUI), "esempi")
+    misolidio = genera_esempi.melodia_nuda(os.path.join(d, "nuda_misolidio.xml"), "Misolidio",
+        [[(67, 2), (64, 2)], [(70, 2), (65, 2)], [(69, 2), (72, 2)], [(67, 4)],
+         [(67, 2), (64, 2)], [(70, 2), (74, 2)], [(72, 4)]])
+    sp = ingestione.ingerisci(misolidio)
+    acc = A.armonizza(sp, analizzatore.analizza(sp).melodia)
+    verifica(any(a.fondamentale == 10 and a.qualita == "maj" for a in acc),
+             f"I-bVII-IV: proposto il Sib ({[(a.inizio, a.fondamentale) for a in acc]})")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4459,6 +4486,7 @@ if __name__ == "__main__":
     test_armonia_in_piedi_inizio()
     test_armonia_in_piedi_stasi()
     test_armonia_in_piedi_frasi_uguali()
+    test_armonia_pop_modale()
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)
