@@ -155,6 +155,11 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
         partitura.parti.extend(orchestratore.parti_originale(master, cfg.lingua))
         report.append(testo("debug_originale", cfg.lingua))
 
+    # nessuna nota tenuta oltre la fine di un ritornello o l'inizio di una volta
+    interrotte = ripetizioni.taglia_ai_confini(partitura)
+    if interrotte:
+        report.append(testo("ripresa_legature_tolte", cfg.lingua, n=interrotte))
+
     # --- Modulo 4
     base = nome_base or _slug(master.titolo)
     xml_path = os.path.join(cartella, f"{base}_arrangiamento.musicxml")

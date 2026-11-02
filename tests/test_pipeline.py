@@ -3756,6 +3756,41 @@ def test_controlli_ripresa(es):
     verifica(any(m.startswith("[Forma]") for m in r.report), "report della pipeline")
 
 
+def test_taglio_ai_confini(es):
+    """Nessuna nota e nessuna legatura attraversano la fine di un ritornello
+    o l'inizio di una volta; le altezze restano quelle."""
+    from arranger import ripetizioni
+    from arranger.modello import Evento, Parte, Partitura
+    sp = ingestione.ingerisci(es["volte"])
+    T = sp.misure[3].fine                         # fine di m4, prima della 1a volta
+    tenuta = Evento(inizio=T - 1, durata=2, altezze=[72], letterale=True)
+    legata = Evento(inizio=T - 1, durata=1, altezze=[67], legata_dopo=True,
+                    letterale=True)
+    p = Parte(id="x", nome="X", abbrev="X", strumento="flauto",
+              eventi=[tenuta, legata, Evento(inizio=T, durata=1, altezze=[67])])
+    part = Partitura(misure=sp.misure, parti=[p])
+    n = ripetizioni.taglia_ai_confini(part)
+    ev = sorted(p.eventi, key=lambda e: (e.inizio, e.altezze))
+    verifica(not any(e.inizio < T - 1e-6 and e.fine > T + 1e-6 for e in ev),
+             "nessun evento attraversa il confine")
+    verifica(not any(e.legata_dopo and abs(e.fine - T) < 1e-6 for e in ev),
+             "nessuna legatura al confine")
+    verifica(sorted(a for e in ev for a in e.altezze) == [67, 67, 72, 72],
+             f"altezze invariate: {[e.altezze for e in ev]}")
+    verifica(n == 2, f"due legature letterali interrotte: {n}")
+
+    r = esegui(es["volte"], Configurazione(formazione=ORGANICO_RIPRESA),
+               cartella=os.path.join(QUI, "_out"))
+    tagli = [r.partitura.misure[i].fine
+             for i in ripetizioni.confini(r.partitura.misure)]
+    for parte in r.partitura.parti:
+        for e in parte.eventi:
+            verifica(not any(e.inizio < x - 1e-6 and e.fine > x + 1e-6 for x in tagli),
+                     f"{parte.nome}: evento oltre un confine a {e.inizio}")
+            verifica(not (e.legata_dopo and any(abs(e.fine - x) < 1e-6 for x in tagli)),
+                     f"{parte.nome}: legatura oltre un confine a {e.inizio}")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -3781,6 +3816,7 @@ if __name__ == "__main__":
     test_lettura_segni_ripresa(es)
     test_ordine_esecuzione(es)
     test_controlli_ripresa(es)
+    test_taglio_ai_confini(es)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

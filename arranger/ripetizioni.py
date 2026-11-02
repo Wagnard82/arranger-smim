@@ -17,10 +17,11 @@ volte si suona l'ultima. «To Coda» e «Fine» valgono solo dopo il salto.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Dict, List, Set, Tuple
 
 from .lingua import t
-from .modello import Misura
+from .modello import Evento, Misura, Partitura
 
 
 def ha_segni(misure: List[Misura]) -> bool:
@@ -202,3 +203,42 @@ def controlla(misure: List[Misura], lingua: str) -> List[str]:
     if any(r.salto for r in r_):
         righe.append(t("ripresa_convenzione", lingua))
     return righe + avvisi
+
+
+def taglia_ai_confini(partitura: Partitura) -> int:
+    """
+    Spezza ogni evento che attraversa un confine di ripresa e toglie le
+    legature di valore che lo superano: oltre il confine, in almeno un
+    passaggio, non si suona la misura scritta dopo. Le altezze non
+    cambiano, cambia solo la durata scritta.
+
+    Restituisce quante legature di materiale `letterale` (copiato
+    dall'originale) sono state interrotte, per il report.
+    """
+    tempi = sorted(partitura.misure[i].fine for i in confini(partitura.misure))
+    if not tempi:
+        return 0
+    interrotte = 0
+    for parte in partitura.parti:
+        nuovi: List[Evento] = []
+        for e in parte.eventi:
+            pezzi = [e]
+            for x in tempi:
+                ultimo = pezzi[-1]
+                if ultimo.inizio < x - 1e-6 and ultimo.fine > x + 1e-6:
+                    if not ultimo.pausa and ultimo.letterale:
+                        interrotte += 1
+                    prima = replace(ultimo, durata=x - ultimo.inizio,
+                                    altezze=list(ultimo.altezze),
+                                    legata_dopo=False, fine_gradazione=False)
+                    dopo = replace(ultimo, inizio=x, durata=ultimo.fine - x,
+                                   altezze=list(ultimo.altezze), gradazione=None)
+                    pezzi[-1:] = [prima, dopo]
+            for pz in pezzi:
+                if pz.legata_dopo and any(abs(pz.fine - x) < 1e-6 for x in tempi):
+                    pz.legata_dopo = False
+                    if pz.letterale:
+                        interrotte += 1
+            nuovi.extend(pezzi)
+        parte.eventi = nuovi
+    return interrotte
