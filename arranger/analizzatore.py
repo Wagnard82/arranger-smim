@@ -1668,9 +1668,14 @@ def analizza_con_melodia(sp: Spartito, melodia: List[Nota]) -> Analisi:
     """Come `analizza`, ma con una melodia gia' decisa (per esempio dall'IA)."""
     # se lo spartito porta gia' le sigle, quelle comandano
     armonia = armonia_dalle_sigle(sp)
+    tonalita_proposta = None
     if not armonia:
-        armonia = (armonizza_melodia(sp, melodia) if sp.tipo == "lead_sheet"
-                   else rileva_armonia(sp))
+        if sp.tipo == "lead_sheet":
+            from .armonizzazione import ultima_tonalita
+            armonia = armonizza_melodia(sp, melodia)
+            tonalita_proposta = ultima_tonalita(sp, melodia)
+        else:
+            armonia = rileva_armonia(sp)
     if sp.tipo not in ("solista_e_piano", "lead_sheet"):
         melodia = completa_mano(sp, scarta_figurazione(sp, melodia, armonia))
     basso = rileva_basso(sp, armonia)
@@ -1688,5 +1693,5 @@ def analizza_con_melodia(sp: Spartito, melodia: List[Nota]) -> Analisi:
                    figurazione=figurazione, voci_interne=voci,
                    frammenti=frammenti, groove=groove, suddivisione=sudd,
                    frasi=frasi, periodi=periodi, sezioni=sezioni, forma=forma,
-                   ritornelli=ritornelli,
+                   ritornelli=ritornelli, tonalita_proposta=tonalita_proposta,
                    melodia_affidabile=_melodia_affidabile(sp, melodia))

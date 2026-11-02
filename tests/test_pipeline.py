@@ -4320,6 +4320,18 @@ def test_rivolti():
     verifica(fuori[-2].basso in (None, 7), "V di cadenza in stato fondamentale")
 
 
+def test_report_tonalita_proposta(es):
+    """La riga d'ingresso dice in che tonalita' e modo e' stata proposta
+    l'armonia, nelle due lingue."""
+    cfg = Configurazione(formazione={"flauto": 1, "pianoforte": 1})
+    r = esegui(es["la_minore"], cfg, cartella=os.path.join(QUI, "_out"), nome_base="nuda_it")
+    verifica(any("in La minore" in m for m in r.report), f"report IT: {r.report[:3]}")
+    r_en = esegui(es["la_minore"], Configurazione(formazione={"flauto": 1, "pianoforte": 1},
+                  lingua="en"), cartella=os.path.join(QUI, "_out"), nome_base="nuda_en")
+    verifica(any("in A minor" in m for m in r_en.report), f"report EN: {r_en.report[:3]}")
+    verifica(r.analisi.tonalita_proposta == (9, "minore"), "tonalita' proposta in Analisi")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4360,6 +4372,7 @@ if __name__ == "__main__":
     test_candidati_e_punteggio()
     test_armonizzazione_viterbi(inno_nudo, es_arm)
     test_rivolti()
+    test_report_tonalita_proposta(es_arm)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

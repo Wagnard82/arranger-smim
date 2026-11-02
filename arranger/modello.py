@@ -235,6 +235,9 @@ class Analisi:
     forma: str = "classica"          # "classica" oppure "pop"
     melodia_affidabile: bool = True  # False nei brani di sola tessitura
     ritornelli: List[Tuple[float, float]] = field(default_factory=list)
+    # (tonica, "maggiore" | "minore") quando l'armonia e' stata proposta
+    # dall'arrangiatore per una melodia nuda; None se viene dal file
+    tonalita_proposta: Optional[Tuple[int, str]] = None
 
 
 # --------------------------------------------------------------------------

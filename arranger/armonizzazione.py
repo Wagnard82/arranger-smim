@@ -560,3 +560,10 @@ def scegli_bassi(accordi: List[Accordo], melodia: List[Nota],
                     qualita=a.qualita, confidenza=a.confidenza,
                     basso=None if b == a.fondamentale else b)
             for a, b in zip(accordi, bassi)]
+
+
+def ultima_tonalita(sp: Spartito, melodia: List[Nota]) -> Tuple[int, str]:
+    """La tonalita' e il modo in cui `armonizza` propone l'armonia."""
+    from .analizzatore import rileva_frasi     # qui: import circolare
+    note = sorted(melodia, key=lambda n: n.inizio)
+    return tonalita_della_melodia(sp, note, rileva_frasi(sp, note) if note else [])

@@ -1471,7 +1471,13 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
             part.report.append(testo("ingresso_lead_sheet", lingua,
                                      n=len(sp.sigle)))
         else:
-            part.report.append(testo("ingresso_lead_sheet_senza_sigle", lingua))
+            from .lingua import nota as nome_nota
+            tonica, modo = analisi.tonalita_proposta or (0, "maggiore")
+            bemolli = bool(sp.misure) and sp.misure[0].tonalita < 0
+            part.report.append(testo(
+                "ingresso_lead_sheet_senza_sigle", lingua,
+                tonalita=nome_nota(60 + tonica, lingua, bemolli=bemolli)[:-1],
+                modo=testo(f"modo_{modo}", lingua)))
     elif sp.tipo == "solista_e_piano":
         part.report.append(testo("ingresso_solista", lingua))
     if cfg.livelli_strumenti:

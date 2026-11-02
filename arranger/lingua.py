@@ -356,9 +356,11 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
         "en": "[Input] lead sheet detected: the melody is the written one; bass and accompaniment are built from the {n} chord symbols in the file. The bass plays the root of each chord (or the note after the slash, in inversions such as C/E).",
     },
     "ingresso_lead_sheet_senza_sigle": {
-        "it": "[Ingresso] lead sheet SENZA SIGLE: l'armonia e' stata proposta dall'arrangiatore, un accordo per misura sui gradi principali della tonalita'. E' un'armonizzazione plausibile della melodia, non necessariamente quella del brano: dalla sola melodia non si puo' ricostruire. Per un arrangiamento fedele aggiungi le sigle nel file (in Dorico, MuseScore o Sibelius) e rigenera.",
-        "en": "[Input] lead sheet WITHOUT CHORD SYMBOLS: the harmony was proposed by the arranger, one chord per bar on the main degrees of the key. It is a plausible harmonisation of the melody, not necessarily the song's own: that cannot be reconstructed from the melody alone. For a faithful arrangement, add chord symbols to the file (in Dorico, MuseScore or Sibelius) and generate again.",
+        "it": "[Ingresso] lead sheet SENZA SIGLE: l'armonia e' stata proposta dall'arrangiatore in {tonalita} {modo}, seguendo la melodia (cadenze, ritmo armonico, dominanti secondarie dove la melodia le chiede). E' un'armonizzazione plausibile, non necessariamente quella del brano: per un arrangiamento fedele aggiungi le sigle nel file (in Dorico, MuseScore o Sibelius) e rigenera.",
+        "en": "[Input] lead sheet WITHOUT CHORD SYMBOLS: the harmony was proposed by the arranger in {tonalita} {modo}, following the melody (cadences, harmonic rhythm, secondary dominants where the melody asks for them). It is a plausible harmonization, not necessarily the song's own: for a faithful arrangement add the chord symbols to the file (in Dorico, MuseScore or Sibelius) and generate again.",
     },
+    "modo_maggiore": {"it": "maggiore", "en": "major"},
+    "modo_minore": {"it": "minore", "en": "minor"},
     "ingresso_solista": {
         "it": "[Ingresso] parte solista + pianoforte riconosciuta: la melodia e' la parte del solista, l'accompagnamento quello del pianoforte.",
         "en": "[Input] solo part + piano detected: the melody is the solo part, the accompaniment is the piano part.",
