@@ -675,7 +675,7 @@ def basso_ritmico(percorso):
     return percorso
 
 
-def lead_sheet(percorso):
+def lead_sheet(percorso, sigle=True):
     """
     LEAD SHEET: la sola melodia su un rigo, con le sigle degli accordi sopra.
     E' il formato dei canzonieri e dei fake book, e il modo piu' rapido per un
@@ -743,6 +743,8 @@ def lead_sheet(percorso):
         for midi, q in battuta:
             while da_scrivere and da_scrivere[0][0] <= t + 1e-6:
                 _q, passo, tipo = da_scrivere.pop(0)
+                if not sigle:
+                    continue      # la sola melodia: l'Inno da armonizzare
                 righe += ['      <harmony>',
                           f'        <root><root-step>{passo}</root-step></root>',
                           f'        <kind>{tipo}</kind>',
@@ -918,6 +920,45 @@ def volta_aperta(percorso):
     segni[3] = {"barra_inizio": _stanghetta("left", "forward")}
     segni[4] = {"barra_fine": _stanghetta("right", "backward")}
     return _brano_ripresa(percorso, "Volta aperta", segni)
+
+
+def melodia_nuda(percorso, titolo, misure, fifths=0, num=4, den=4, anacrusi=None):
+    """
+    Una melodia sola su un rigo, senza sigle: il caso in cui l'arrangiatore
+    deve proporre l'armonia. `misure` e' una lista di misure, ognuna una
+    lista di (midi, quarti), con midi=None per la pausa; `anacrusi` e' una
+    misura parziale facoltativa in testa.
+    """
+    righe = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" '
+        '"http://www.musicxml.org/dtds/partwise.dtd">',
+        '<score-partwise version="4.0">',
+        f"  <work><work-title>{titolo}</work-title></work>",
+        "  <part-list>",
+        '    <score-part id="P1"><part-name>Melodia</part-name></score-part>',
+        "  </part-list>",
+        '  <part id="P1">',
+    ]
+    tutte = ([anacrusi] if anacrusi else []) + list(misure)
+    for i, battuta in enumerate(tutte):
+        numero = i if anacrusi else i + 1
+        implicito = ' implicit="yes"' if anacrusi and i == 0 else ""
+        righe.append(f'    <measure number="{numero}"{implicito}>')
+        if i == 0:
+            righe += ["      <attributes>",
+                      f"        <divisions>{DIV}</divisions>",
+                      f"        <key><fifths>{fifths}</fifths></key>",
+                      f"        <time><beats>{num}</beats><beat-type>{den}</beat-type></time>",
+                      "        <clef><sign>G</sign><line>2</line></clef>",
+                      "      </attributes>"]
+        for midi, q in battuta:
+            nota = _nota(midi or 60, q, 1, 1, pausa=midi is None)
+            righe += [r for r in nota if "<staff>" not in r]
+        righe.append("    </measure>")
+    righe += ["  </part>", "</score-partwise>"]
+    _scrivi(percorso, righe)
+    return percorso
 
 
 if __name__ == "__main__":

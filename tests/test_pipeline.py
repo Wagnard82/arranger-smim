@@ -4154,6 +4154,55 @@ def test_server_tonalita(inno):
     verifica(out.get("suggerimento") is None, f"server: Do per flauti e violini, niente: {out}")
 
 
+# --------------------------------------------------------------------------
+# Armonizzazione della melodia nuda (Piston)
+# --------------------------------------------------------------------------
+
+
+def prepara_armonia():
+    d = os.path.join(os.path.dirname(QUI), "esempi")
+    g = genera_esempi
+    es = {}
+    # La minore con la sensibile: si chiude su La lungo
+    es["la_minore"] = g.melodia_nuda(os.path.join(d, "nuda_la_minore.xml"), "La minore",
+        [[(69, 1), (72, 1), (76, 1), (72, 1)], [(71, 1), (68, 1), (71, 1), (76, 1)],
+         [(72, 1), (71, 1), (69, 1), (68, 1)], [(69, 4)]])
+    # stesse note senza Sol# e chiusura su Do: Do maggiore
+    es["do_maggiore"] = g.melodia_nuda(os.path.join(d, "nuda_do_maggiore.xml"), "Do maggiore",
+        [[(69, 1), (72, 1), (76, 1), (72, 1)], [(71, 1), (67, 1), (71, 1), (74, 1)],
+         [(72, 1), (71, 1), (69, 1), (67, 1)], [(72, 4)]])
+    es["valzer"] = g.melodia_nuda(os.path.join(d, "nuda_valzer.xml"), "Valzer",
+        [[(67, 1), (72, 1), (76, 1)], [(74, 2), (71, 1)], [(72, 3)]], num=3, den=4)
+    es["sei_ottavi"] = g.melodia_nuda(os.path.join(d, "nuda_sei_ottavi.xml"), "6/8",
+        [[(72, 1.5), (74, 1.5)], [(72, 3)]], num=6, den=8)
+    es["levare"] = g.melodia_nuda(os.path.join(d, "nuda_levare.xml"), "Levare",
+        [[(72, 2), (76, 2)], [(79, 2), (76, 2)], [(74, 2), (71, 2)], [(72, 4)]],
+        anacrusi=[(67, 1)])
+    return es
+
+
+def test_griglia_e_tonalita(inno_nudo, es):
+    """Griglia del ritmo armonico per metro e tonalita' della sola melodia,
+    maggiore o relativa minore (Piston cap. 4 e 9)."""
+    from arranger import armonizzazione as A
+    def tratti(nome):
+        return A.griglia(ingestione.ingerisci(es[nome]))
+    verifica(len(tratti("la_minore")) == 8, "4/4: due tratti per misura")
+    verifica(len(tratti("valzer")) == 3, "3/4: uno per misura")
+    verifica(len(tratti("sei_ottavi")) == 2, "6/8: uno per misura")
+    t = tratti("levare")
+    verifica(len(t) == 1 + 4 * 2 and abs(t[0].fine - t[0].inizio - 1.0) < 1e-6,
+             f"levare: un tratto ({[(x.inizio, x.fine) for x in t[:3]]})")
+    verifica([x.forza for x in t[1:3]] == [2, 1], "forza: battere 2, meta' misura 1")
+    def tono(percorso):
+        sp = ingestione.ingerisci(percorso)
+        mel = analizzatore.analizza(sp).melodia
+        return A.tonalita_della_melodia(sp, mel, analizzatore.rileva_frasi(sp, mel))
+    verifica(tono(es["la_minore"]) == (9, "minore"), f"La minore: {tono(es['la_minore'])}")
+    verifica(tono(es["do_maggiore"]) == (0, "maggiore"), f"Do maggiore: {tono(es['do_maggiore'])}")
+    verifica(tono(inno_nudo) == (0, "maggiore"), f"Inno: {tono(inno_nudo)}")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4187,6 +4236,10 @@ if __name__ == "__main__":
     test_strutture_del_repertorio(es)
     test_tonalita_comoda(inno)
     test_server_tonalita(inno)
+    inno_nudo = genera_esempi.lead_sheet(
+        os.path.join(os.path.dirname(QUI), "esempi", "inno_nudo.xml"), sigle=False)
+    es_arm = prepara_armonia()
+    test_griglia_e_tonalita(inno_nudo, es_arm)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)
