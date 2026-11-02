@@ -3677,6 +3677,54 @@ def test_lettura_segni_ripresa(es):
     verifica(all(m.ripresa.vuoti for m in sp.misure), "inno: nessun segno")
 
 
+def test_ordine_esecuzione(es):
+    """L'ordine in cui si suonano le misure segue ritornelli, volte e salti."""
+    from arranger import ripetizioni
+    from arranger.modello import SegniRipresa as S
+
+    def numeri(nome):
+        sp = ingestione.ingerisci(es[nome])
+        return [sp.misure[i].numero for i in ripetizioni.ordine_esecuzione(sp.misure)]
+    verifica(numeri("ritornello") == [1, 2, 3, 4, 5, 6, 3, 4, 5, 6, 7, 8],
+             f"ritornello: {numeri('ritornello')}")
+    verifica(numeri("volte") == [1, 2, 3, 4, 5, 1, 2, 3, 4, 6, 7],
+             f"volte: {numeri('volte')}")
+    verifica(numeri("ds_al_coda") == [1, 2, 3, 4, 5, 6, 7, 3, 4, 5, 8, 9],
+             f"D.S. al Coda, coda doppia: {numeri('ds_al_coda')}")
+    verifica(numeri("dc_al_fine") == [1, 2, 3, 4, 5, 6, 1, 2, 3, 4],
+             f"D.C. al Fine: {numeri('dc_al_fine')}")
+    verifica(numeri("ritornello_levare") == [0, 1, 2, 3, 0, 1, 2, 3],
+             f"ritornello col levare: {numeri('ritornello_levare')}")
+
+    def finte(segni):
+        ms = [Misura(i + 1, 4.0 * i, 4.0) for i in range(len(segni))]
+        for m, s in zip(ms, segni):
+            m.ripresa = s or S()
+        return ms
+    ms = finte([S(ritornello_inizio=True),
+                S(volte=(1, 2), volta_apre=True, volta_chiude="stop", ritornello_fine=3),
+                S(volte=(3,), volta_apre=True, volta_chiude="stop"), None])
+    verifica(ripetizioni.ordine_esecuzione(ms) == [0, 1, 0, 1, 0, 2, 3],
+             f"volta 1,2 e times=3: {ripetizioni.ordine_esecuzione(ms)}")
+    ms = finte([None, S(ritornello_fine=2), None, S(ritornello_fine=2)])
+    verifica(ripetizioni.ordine_esecuzione(ms) == [0, 1, 0, 1, 2, 3, 0, 1, 2, 3],
+             f":| senza |: torna all'inizio: {ripetizioni.ordine_esecuzione(ms)}")
+    ms = finte([None, S(salto="ds"), None])
+    verifica(ripetizioni.ordine_con_esito(ms) == ([0, 1, 2], "destinazione"),
+             f"D.S. senza segno: {ripetizioni.ordine_con_esito(ms)}")
+
+    sp = ingestione.ingerisci(es["volte"])
+    verifica(ripetizioni.confini(sp.misure) == {3, 4},
+             f"confini delle volte: {ripetizioni.confini(sp.misure)}")
+    sp = ingestione.ingerisci(es["dc_al_fine"])
+    verifica(ripetizioni.confini(sp.misure) == {3, 5},
+             f"confini D.C. al Fine: {ripetizioni.confini(sp.misure)}")
+    verifica(not ripetizioni.ha_segni(ingestione.ingerisci(es["inno"]).misure),
+             "inno senza segni")
+    verifica(ripetizioni.ha_segni(ingestione.ingerisci(es["volte"]).misure),
+             "volte con segni")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -3700,6 +3748,7 @@ if __name__ == "__main__":
      sigle_68, voce_piano) = prepara()
     es = prepara_ripresa(inno)
     test_lettura_segni_ripresa(es)
+    test_ordine_esecuzione(es)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

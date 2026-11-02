@@ -17,6 +17,7 @@
   "arranger/orchestratore.py": "10e67f1fe23919d3ad8ca1461658acc85c52cf41675e1895fc0c44a06e496532",
   "arranger/pipeline.py": "3503d68d19fb99c6c8799c28ff622b78520aea8b009376e710add8680dfc32b3",
   "arranger/richiesta.py": "f21aeb2f4f0b5ae9ebf9ae96032e5af2077094764d7b2338ffc59cbe3f09538f",
+  "arranger/ripetizioni.py": "224ffde87abd56bc7a3afae9758af321dd556b0272558891d54360f7c59e8bc8",
   "arranger/strumenti.py": "1a3f979f0334210a92d800ed56247b55f504d5e66051fcfc26794c7854e531bf",
   "arranger/testi_interfaccia.py": "c57c6fe4a54e61d64813bd072806c80342d9bf16945e9b08ba82a1e2b94e47ab",
   "arranger/versione.py": "01203190080896b9d41bd275162a2ed2965ca21eb4d9168cb63d83e357943d6b",
