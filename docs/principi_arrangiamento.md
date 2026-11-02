@@ -632,6 +632,38 @@ e confrontate movimento per movimento con la fondamentale vera):
 | Easy On Me | 34% | 70 | 28 |
 | The Girl from Ipanema | 7% | 25 | 14 |
 
+**Misura dopo il nuovo armonizzatore (2/11/2026, ramo `armonizzazione`).**
+Fondamentale giusta, movimento per movimento; tra parentesi il valore
+vecchio.
+
+| Brano | Nuovo | Vecchio |
+|---|---|---|
+| Let It Be | 45% | 46% |
+| All of Me | 33% | 32% |
+| Easy On Me | 41% | 34% |
+| Bridge over Troubled Water | 40% | 39% |
+| Dust in the Wind | 31% | 45% |
+| (Everything I Do) I Do It for You | 40% | 51% |
+| Stand by Me | 36% | 36% |
+| Salve Regina | 22% | 24% |
+| **Media pop** | **36%** | **38%** |
+| Inno alla gioia (prova) | 88% | 84% |
+
+**Taratura.** Con il metodo «uno escluso» su 288 combinazioni di pesi la
+media non supera il 38%. I pesi migliori premiano il cambio sul battere, ma
+rompono le regole: niente cadenza V-I, la tonica non resta nelle
+introduzioni senza melodia. Si tengono quindi i pesi che rispettano le
+regole.
+
+**Lettura.** Sulle melodie pop la sola melodia non distingue fra gli
+accordi che contengono le stesse note (Do, La- e Fa su una melodia
+pentatonica). Inoltre le sigle pop usano spesso accordi che non
+contengono la nota della melodia (sus, add9, anticipazioni di un ottavo
+prima della stanghetta). Il motore guadagna dove la melodia è «da
+manuale» (Inno, Easy On Me) e perde dove l'armonia del brano è una
+progressione ripetuta indipendente dalla melodia (Dust in the Wind,
+I Do It for You).
+
 Cosa manca rispetto a Piston:
 - il ritmo armonico a mezza misura, perché nel pop cambia ogni due movimenti
   (Let It Be: un solo accordo per tutto il brano);

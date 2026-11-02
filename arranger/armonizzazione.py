@@ -95,46 +95,46 @@ def _forte(sp: Spartito, n: Nota) -> bool:
     return abs(rel) < 1e-6 or abs(rel - m.durata_piena / 2) < 1e-6
 
 
+def _risoluzioni(note: List[Nota], sensibile: int) -> int:
+    """Quante volte la nota `sensibile` sale di semitono alla nota dopo."""
+    return sum(1 for n, dopo in zip(note, note[1:])
+               if n.midi % 12 == sensibile and dopo.midi - n.midi == 1)
+
+
 def tonalita_della_melodia(sp: Spartito, melodia: List[Nota],
                            frasi: List[Tuple[float, float]]) -> Tuple[int, str]:
     """
     (tonica come classe d'altezza, "maggiore" | "minore").
 
-    Fra il maggiore dell'armatura e la sua relativa minore decide la
-    chiusura (Piston P2): la nota finale del brano e delle frasi, la
-    sensibile alzata del minore, le note lunghe o in battere che stanno
-    nell'una o nell'altra triade di tonica. Nel dubbio vince il maggiore.
+    Fra il maggiore dell'armatura e la sua relativa minore. Il minore
+    richiede una prova forte:
+      * la sensibile alzata (Sol# in La minore) che sale alla tonica almeno
+        due volte (Piston cap. 4), oppure
+      * la melodia che chiude sulla tonica minore, con le note lunghe o in
+        battere nettamente piu' nella triade minore che in quella maggiore.
+    Nel dubbio vince il maggiore.
+
+    Le chiusure di frase (Piston P2) non decidono il modo: sul banco di
+    prova (2/11/2026) nel pop le frasi chiudono spesso sulla terza o sulla
+    sesta, e davano il minore ad All of Me e il maggiore a Dust in the
+    Wind. `frasi` resta nella firma per quando ci saranno piu' brani in
+    minore su cui misurarle.
     """
     maggiore = (_armatura_prevalente(sp) * 7) % 12
     minore = (maggiore + 9) % 12
-    if not melodia:
-        return maggiore, "maggiore"
     note = sorted(melodia, key=lambda n: n.inizio)
+    if not note:
+        return maggiore, "maggiore"
+    if _risoluzioni(note, (minore - 1) % 12) >= 2:
+        return minore, "minore"
+    forti = [n for n in note if _forte(sp, n)]
+    totale = sum(n.durata for n in forti) or 1.0
 
-    def punti(tonica: int, terza: int) -> float:
-        p = 0.0
-        ultima = note[-1].midi % 12
-        if ultima == tonica:
-            p += 2.0
-        elif ultima == (tonica + 7) % 12:
-            p += 1.0
-        for _a, b in frasi:
-            dentro = [n for n in note if n.inizio < b - 1e-6]
-            if dentro and dentro[-1].midi % 12 == tonica:
-                p += 1.0
+    def quota(tonica: int, terza: int) -> float:
         triade = {tonica, (tonica + terza) % 12, (tonica + 7) % 12}
-        forti = [n for n in note if _forte(sp, n)]
-        totale = sum(n.durata for n in forti) or 1.0
-        p += sum(n.durata for n in forti if n.midi % 12 in triade) / totale
-        return p
+        return sum(n.durata for n in forti if n.midi % 12 in triade) / totale
 
-    p_magg = punti(maggiore, 4)
-    p_min = punti(minore, 3)
-    # la sensibile alzata (Sol# in La minore) e' il segno piu' chiaro del
-    # minore: nel maggiore relativo quella nota non c'e'
-    if any(n.midi % 12 == (minore - 1) % 12 for n in note):
-        p_min += 1.5
-    if p_min - p_magg > 1.0:
+    if note[-1].midi % 12 == minore and quota(minore, 3) - quota(maggiore, 4) > 0.15:
         return minore, "minore"
     return maggiore, "maggiore"
 
@@ -150,7 +150,11 @@ class Pesi:
     passaggio: float = 0.15    # ...ma di passaggio o di volta (P5)
     forte: float = 0.3         # priorita' di I, IV, V (P7); meta' per ii
     # costo di un cambio d'accordo secondo la forza del tratto d'arrivo:
-    # sul battere poco, a meta' misura di piu', altrove molto (P4)
+    # sul battere poco, a meta' misura di piu', altrove molto (P4).
+    # Taratura del 2/11/2026 (banco_armonia.py --taratura, 8 brani pop): i
+    # pesi migliori sul banco (premio al cambio sul battere) arrivano al 38%
+    # di fondamentali giuste, come l'armonizzatore vecchio, e rompono
+    # cadenze e tonica tenuta: si tengono questi, che rispettano le regole.
     cambio: Tuple[float, float, float] = (0.25, 1.4, 1.6)
     abituale: float = 0.0      # tavola delle successioni (P6)
     a_volte: float = 0.25

@@ -4332,6 +4332,23 @@ def test_report_tonalita_proposta(es):
     verifica(r.analisi.tonalita_proposta == (9, "minore"), "tonalita' proposta in Analisi")
 
 
+def test_banco_armonia():
+    """Il banco di prova: sola melodia da uno spartito con le sigle, e
+    confronto movimento per movimento con le sigle vere."""
+    import banco_armonia as B
+    from arranger import armonizzazione as A
+    d = os.path.join(os.path.dirname(QUI), "esempi")
+    vero = ingestione.ingerisci(genera_esempi.lead_sheet(os.path.join(d, "lead_sheet.xml")))
+    nudo, mel = B.solo_melodia(vero)
+    verifica(nudo.sigle == [] and nudo.tipo == "lead_sheet" and mel, "solo melodia")
+    verifica(vero.sigle, "lo spartito originale tiene le sue sigle")
+    r = B.confronta(vero, A.armonizza(nudo, mel), 0)
+    verifica(r["fondamentali"] >= 0.84 and r["cambi_veri"] > 0, f"confronto: {r}")
+    perfetto = B.confronta(vero, analizzatore.armonia_dalle_sigle(vero), 0)
+    verifica(perfetto["fondamentali"] == 1.0 and perfetto["funzioni"] == 1.0,
+             f"le sigle contro se stesse: {perfetto}")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4373,6 +4390,7 @@ if __name__ == "__main__":
     test_armonizzazione_viterbi(inno_nudo, es_arm)
     test_rivolti()
     test_report_tonalita_proposta(es_arm)
+    test_banco_armonia()
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)
