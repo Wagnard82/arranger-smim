@@ -3912,6 +3912,25 @@ def test_midi_srotolato(es):
         modulo.srotola_eventi = originale
 
 
+def test_segni_lilypond(es):
+    """Il sorgente LilyPond porta ritornelli, volte, Segno, Coda e testi.
+    L'incisione non e' verificata qui (LilyPond non e' fra le dipendenze)."""
+    cfg = {"flauto": 1, "pianoforte": 1}
+    r = esegui(es["volte"], Configurazione(formazione=cfg),
+               cartella=os.path.join(QUI, "_out"), nome_base="volte_ly", esporta_ly=True)
+    with open(r.percorso_ly, encoding="utf-8") as f:
+        ly = f.read()
+    verifica('\\bar ".|:"' in ly and '\\bar ":|."' in ly, "stanghette di ritornello")
+    verifica('(volta "1.")' in ly and '(volta "2.")' in ly and "(volta #f)" in ly, "volte")
+    verifica(ly.count('(volta "1.")') == 1, "volte una volta sola, non per rigo")
+    r = esegui(es["ds_al_coda"], Configurazione(formazione=cfg),
+               cartella=os.path.join(QUI, "_out"), nome_base="ds_ly", esporta_ly=True)
+    with open(r.percorso_ly, encoding="utf-8") as f:
+        ly = f.read()
+    verifica('"scripts.segno"' in ly and '"scripts.coda"' in ly, "Segno e Coda")
+    verifica("D.S. al Coda" in ly and "Al Coda" in ly, "testi dei salti")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -3940,6 +3959,7 @@ if __name__ == "__main__":
     test_taglio_ai_confini(es)
     test_segni_nel_musicxml(es)
     test_midi_srotolato(es)
+    test_segni_lilypond(es)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

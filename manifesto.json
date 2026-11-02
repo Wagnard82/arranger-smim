@@ -11,7 +11,7 @@
   "arranger/ia.py": "880d548e09321e6c98d1b47b8648c18ff3259ea4095209a93041186ccf1a4228",
   "arranger/ingestione.py": "db71878d888aabe46c31d5626109faf6b438f95bcdeee6ac828db43852199d65",
   "arranger/interprete.py": "aef3ae9f0ce9aca47f9365d5394fb341bbad582a726637c402f2e331b08806e9",
-  "arranger/lilypond.py": "a9aa1f98c1851b6a5335a7474770c7167f748213137c35a3281c70b7302413e2",
+  "arranger/lilypond.py": "3a21ddc44f7d2383888baba5892b6ed1c97f88d1eeb9c0d5faa9840779ed14f6",
   "arranger/lingua.py": "5a7c1254998d3d72dcab8c1e57d0f40bfd715210696029ccee445f19fc7dcbd8",
   "arranger/modello.py": "d89018102878d7ac54bdbd06ae70a0b32aeb72ee2ce01d20a0f6e8c4840744ac",
   "arranger/orchestratore.py": "10e67f1fe23919d3ad8ca1461658acc85c52cf41675e1895fc0c44a06e496532",

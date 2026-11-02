@@ -179,8 +179,52 @@ class EsportatoreLilyPond:
                 righe.append(f"  \\set Timing.measureLength = "
                              f"#(ly:make-moment {m.num}/{m.den})")
                 lunghezza_corrente = None
+            prima = parte is self.p.parti[0] and rigo == 1
+            righe.extend(self._ripresa_prima(m, prima))
             righe.append("  " + self._misura(eventi, m, parte, armatura))
+            righe.extend(self._ripresa_dopo(m, prima))
         return "\n".join(righe)
+
+    # ------------------------------------------------------ segni di ripresa
+    # \bar in tutti i righi; volte, Segno, Coda e testi valgono per la
+    # partitura intera e si scrivono una volta sola, nel primo rigo.
+    # Sorgente verificato dai test; incisione NON verificata (LilyPond non
+    # e' installato nell'ambiente di sviluppo).
+    def _ripresa_prima(self, m: Misura, prima: bool) -> List[str]:
+        s = m.ripresa
+        r: List[str] = []
+        if s.ritornello_inizio:
+            r.append('  \\bar ".|:"')
+        if prima and s.volta_apre:
+            etichetta = ", ".join(str(v) for v in s.volte) + "."
+            r.append(f"  \\set Score.repeatCommands = #'((volta \"{etichetta}\"))")
+        if prima and s.segno:
+            r.append('  \\mark \\markup { \\musicglyph "scripts.segno" }')
+        if prima and s.coda:
+            r.append('  \\mark \\markup { \\musicglyph "scripts.coda" }')
+        return r
+
+    def _ripresa_dopo(self, m: Misura, prima: bool) -> List[str]:
+        from .lingua import t as testo
+        s = m.ripresa
+        r: List[str] = []
+        if prima:
+            testi = []
+            if s.al_coda:
+                testi.append(testo("segno_al_coda", self.p.lingua))
+            if s.fine:
+                testi.append(testo("segno_fine", self.p.lingua))
+            if s.salto:
+                chiave = f"segno_{s.salto}" + (f"_{s.salto_verso}" if s.salto_verso else "")
+                testi.append(s.testo_salto or testo(chiave, self.p.lingua))
+            for scritta in testi:
+                scritta = scritta.replace('"', '\\"')
+                r.append(f'  \\textEndMark \\markup {{ \\italic "{scritta}" }}')
+            if s.volta_chiude:
+                r.append("  \\set Score.repeatCommands = #'((volta #f))")
+        if s.ritornello_fine:
+            r.append('  \\bar ":|."')
+        return r
 
     def _partial(self, durata: float) -> str:
         frammenti = scomponi(int(round(durata * DIV)))
