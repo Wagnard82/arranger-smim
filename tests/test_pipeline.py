@@ -4203,6 +4203,29 @@ def test_griglia_e_tonalita(inno_nudo, es):
     verifica(tono(inno_nudo) == (0, "maggiore"), f"Inno: {tono(inno_nudo)}")
 
 
+def test_candidati_e_punteggio():
+    """Dominanti secondarie solo con la loro sensibile che sale; le note di
+    passaggio pesano meno delle estranee sul battere (Piston P12, P5)."""
+    from arranger import armonizzazione as A
+    N = lambda m, t, d: Nota(midi=m, inizio=t, durata=d)
+    sale = [N(67, 0, 1), N(66, 1, 1), N(67, 2, 2)]       # Sol-Fa#-Sol
+    scende = [N(67, 0, 1), N(66, 1, 1), N(65, 2, 2)]     # Sol-Fa#-Fa
+    gradi = lambda note: {c.grado for c in A.candidati(0, "maggiore", note)}
+    verifica("V/V" in gradi(sale), "Fa# che sale: V/V candidato")
+    verifica("V/V" not in gradi(scende), "Fa# che scende: niente V/V")
+    verifica({"I", "IV", "V", "vi"} <= gradi([]), "gradi del maggiore")
+    verifica({"i", "iv", "V", "VI", "VII"} <= {c.grado for c in A.candidati(9, "minore", [])},
+             "gradi del minore")
+    p, t = A.Pesi(), A.Tratto(0.0, 2.0, 2)
+    I, V = A.Candidato(0, "maj", "I"), A.Candidato(7, "maj", "V")
+    do_mi = [N(60, 0, 1), N(64, 1, 1)]
+    verifica(A.emissione(t, I, do_mi, p) > A.emissione(t, V, do_mi, p), "Do-Mi: I meglio di V")
+    passaggio = [N(60, 0, 1), N(62, 1, 0.5), N(64, 1.5, 0.5)]   # Re di passaggio
+    appoggio = [N(62, 0, 1), N(64, 1, 1)]                       # Re sul battere
+    verifica(A.emissione(t, I, passaggio, p) > A.emissione(t, I, appoggio, p),
+             "nota di passaggio meno penalizzata di un'estranea sul battere")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4240,6 +4263,7 @@ if __name__ == "__main__":
         os.path.join(os.path.dirname(QUI), "esempi", "inno_nudo.xml"), sigle=False)
     es_arm = prepara_armonia()
     test_griglia_e_tonalita(inno_nudo, es_arm)
+    test_candidati_e_punteggio()
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

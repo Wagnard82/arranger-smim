@@ -28,7 +28,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
-from .modello import Nota, Spartito
+from .modello import Accordo, Nota, Spartito
 
 
 # --------------------------------------------------------------------------
@@ -137,3 +137,139 @@ def tonalita_della_melodia(sp: Spartito, melodia: List[Nota],
     if p_min - p_magg > 1.0:
         return minore, "minore"
     return maggiore, "maggiore"
+
+
+# --------------------------------------------------------------------------
+# Pesi (tarati con banco_armonia.py, vedi docs/principi_arrangiamento.md 5.2)
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class Pesi:
+    estranea: float = 0.6      # nota della melodia fuori dall'accordo
+    passaggio: float = 0.15    # ...ma di passaggio o di volta (P5)
+    forte: float = 0.3         # priorita' di I, IV, V (P7); meta' per ii
+    # costo di un cambio d'accordo secondo la forza del tratto d'arrivo:
+    # sul battere poco, a meta' misura di piu', altrove molto (P4)
+    cambio: Tuple[float, float, float] = (0.25, 0.45, 0.8)
+    abituale: float = 0.0      # tavola delle successioni (P6)
+    a_volte: float = 0.25
+    raro: float = 0.6
+    assente: float = 1.2
+    salto: float = 0.4         # cambio dentro un salto da tempo debole (P3)
+    cadenza: float = 1.0       # premio di cadenza a fine frase (P11)
+
+    def costo_cambio(self, forza: int) -> float:
+        return self.cambio[2 - max(0, min(2, forza))]
+
+
+# --------------------------------------------------------------------------
+# 3. Accordi candidati
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Candidato:
+    fondamentale: int    # classe d'altezza
+    qualita: str         # "maj", "min", "dim", "dom7"
+    grado: str           # "I", "ii", "V7", "V/V"... per tavola e spiegazioni
+    secondaria: bool = False
+
+
+# (distanza dalla tonica, qualita', grado)
+_DIATONICI = {
+    "maggiore": ((0, "maj", "I"), (2, "min", "ii"), (4, "min", "iii"),
+                 (5, "maj", "IV"), (7, "maj", "V"), (7, "dom7", "V7"),
+                 (9, "min", "vi"), (11, "dim", "vii")),
+    # Piston cap. 4: V maggiore con la sensibile, III e VII col settimo
+    # grado naturale
+    "minore": ((0, "min", "i"), (2, "dim", "ii"), (3, "maj", "III"),
+               (5, "min", "iv"), (7, "maj", "V"), (7, "dom7", "V7"),
+               (8, "maj", "VI"), (10, "maj", "VII"), (11, "dim", "vii")),
+}
+# dominanti secondarie: (grado tonicizzato, sua distanza dalla tonica, anche
+# la triade?). Senza triade quando coincide con un accordo della tonalita'
+# (V/IV in maggiore e' il I; V/VI in minore e' il III): resta la settima.
+_SECONDARIE = {
+    "maggiore": (("ii", 2, True), ("iii", 4, True), ("IV", 5, False),
+                 ("V", 7, True), ("vi", 9, True)),
+    "minore": (("iv", 5, True), ("V", 7, True), ("VI", 8, False)),
+}
+
+
+def _sensibile_che_sale(note: List[Nota], sensibile: int) -> bool:
+    """La nota `sensibile` seguita entro 2 quarti dal semitono sopra (P12)."""
+    ordinate = sorted(note, key=lambda n: n.inizio)
+    for i, n in enumerate(ordinate):
+        if n.midi % 12 != sensibile:
+            continue
+        for dopo in ordinate[i + 1:]:
+            if dopo.inizio - n.inizio > 2.0 + 1e-6:
+                break
+            if dopo.midi % 12 == (sensibile + 1) % 12:
+                return True
+    return False
+
+
+def candidati(tonica: int, modo: str, note: List[Nota]) -> List[Candidato]:
+    """
+    Gli accordi fra cui scegliere. Le dominanti secondarie entrano solo se
+    nel brano la loro sensibile sale al semitono sopra: una nota alterata
+    che scende e' cromatismo melodico, non una tonicizzazione (P12).
+    """
+    fuori = [Candidato((tonica + d) % 12, q, g)
+             for d, q, g in _DIATONICI[modo]]
+    for grado, d, triade in _SECONDARIE[modo]:
+        radice = (tonica + d + 7) % 12
+        if not _sensibile_che_sale(note, (radice + 4) % 12):
+            continue
+        if triade:
+            fuori.append(Candidato(radice, "maj", f"V/{grado}", True))
+        fuori.append(Candidato(radice, "dom7", f"V7/{grado}", True))
+    return fuori
+
+
+# --------------------------------------------------------------------------
+# 4. Punteggio di un candidato su un tratto
+# --------------------------------------------------------------------------
+
+_FORTI = {"I": 1.0, "IV": 1.0, "V": 1.0, "V7": 1.0, "i": 1.0, "iv": 1.0,
+          "ii": 0.5}
+
+
+def _di_passaggio(n: Nota, prima: Nota, dopo: Nota) -> bool:
+    """Arriva e riparte per grado congiunto, ed e' breve (P5)."""
+    return (1 <= abs(n.midi - prima.midi) <= 2 and 1 <= abs(dopo.midi - n.midi) <= 2
+            and n.durata <= 1.0 + 1e-6)
+
+
+def emissione(tratto: Tratto, c: Candidato, melodia: List[Nota], pesi: Pesi) -> float:
+    """
+    Quanto il candidato `c` spiega le note della melodia nel tratto: le
+    note dell'accordo sommano il loro peso (durata, di piu' se attaccano
+    all'inizio del tratto o su un movimento), le estranee lo tolgono, meno
+    se sono di passaggio o di volta su un tempo debole.
+    """
+    note_acc = set(Accordo(inizio=0, durata=1, fondamentale=c.fondamentale,
+                           qualita=c.qualita).note_accordo())
+    ordinate = sorted(melodia, key=lambda n: n.inizio)
+    s = pesi.forte * _FORTI.get(c.grado, 0.0)
+    for i, n in enumerate(ordinate):
+        a, b = max(n.inizio, tratto.inizio), min(n.fine, tratto.fine)
+        if b <= a + 1e-6:
+            continue
+        peso = b - a
+        if abs(n.inizio - tratto.inizio) < 1e-6:
+            peso *= 1.5
+        elif n.inizio > tratto.inizio and abs((n.inizio - tratto.inizio) % 1.0) < 1e-6:
+            peso *= 1.2
+        if n.midi % 12 in note_acc:
+            s += peso
+            continue
+        debole = n.inizio > tratto.inizio + 1e-6
+        if debole and 0 < i < len(ordinate) - 1 \
+                and _di_passaggio(n, ordinate[i - 1], ordinate[i + 1]):
+            s -= peso * pesi.passaggio
+        else:
+            s -= peso * pesi.estranea
+    return s

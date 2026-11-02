@@ -4,7 +4,7 @@
   "arranger/__init__.py": "adc68cd4cef1fc22349f3a6f755413b19ba37c63c0b156ea2651897285444af0",
   "arranger/analizzatore.py": "20ca3a04c7bbedbc410fcecb60897f4db81fe1880d1f90685b37a4e20c7776f7",
   "arranger/anteprima.py": "17b3a6a7ef38fd98f6102bbd11f125a1d276d85ba4fa13716a2355991f5eb3ea",
-  "arranger/armonizzazione.py": "90f1b5742e8a2a54075d62119afe48bca508ad154ebcc76146fb419c6c51bcdf",
+  "arranger/armonizzazione.py": "45ea83393e21adbe21be9159ca116be2aa7098e90e738fa16795666f1089a8b3",
   "arranger/distribuzione.py": "5e33a85974fc975c4578fa290bc9dc9d6eeb3214b5369b4251647bff015899af",
   "arranger/esportatore.py": "98a8ca6cc126adbb90d10038d9bcfe8caeab73e72e4ac1958280af649984882e",
   "arranger/feedback.py": "977b65c324ec3e8791aa3a765e20c7df65e33e24f07f1d1dea60b9d80c4848d1",
