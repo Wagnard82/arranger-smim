@@ -497,6 +497,52 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
         "it": "[Incisione] PDF non generato: {errore}",
         "en": "[Engraving] PDF not generated: {errore}",
     },
+    # ---- segni di ripresa
+    "ripresa_forma": {
+        "it": "[Forma] Ritornelli e salti riconosciuti: si suonano le misure {misure}.",
+        "en": "[Form] Repeats and jumps recognised: the bars are played as {misure}.",
+    },
+    "ripresa_convenzione": {
+        "it": "[Forma] Dopo il D.S./D.C. i ritornelli non si ripetono e delle volte si suona l'ultima.",
+        "en": "[Form] After the D.S./D.C. repeats are not taken and only the last ending is played.",
+    },
+    "ripresa_volta_fuori": {
+        "it": "[Forma] mis. {mis}: volta fuori da un ritornello.",
+        "en": "[Form] bar {mis}: ending outside a repeat.",
+    },
+    "ripresa_senza_inizio": {
+        "it": "[Forma] mis. {mis}: ritornello senza segno d'inizio dopo un altro ritornello, si torna all'inizio del brano.",
+        "en": "[Form] bar {mis}: repeat with no start sign after another repeat, it goes back to the beginning.",
+    },
+    "ripresa_ds_senza_segno": {
+        "it": "[Forma] mis. {mis}: D.S. senza Segno.",
+        "en": "[Form] bar {mis}: D.S. without a Segno.",
+    },
+    "ripresa_coda_mancante": {
+        "it": "[Forma] mis. {mis}: «al Coda» senza Coda.",
+        "en": "[Form] bar {mis}: \"to Coda\" without a Coda.",
+    },
+    "ripresa_fine_mancante": {
+        "it": "[Forma] mis. {mis}: «al Fine» senza Fine.",
+        "en": "[Form] bar {mis}: \"al Fine\" without a Fine.",
+    },
+    "ripresa_lineare": {
+        "it": "[Forma] I segni di ripresa non sono coerenti: l'anteprima suona il brano di seguito, così com'è scritto. I segni restano in partitura.",
+        "en": "[Form] The repeat signs are inconsistent: the preview plays the piece straight through, as written. The signs stay in the score.",
+    },
+    "ripresa_legature_tolte": {
+        "it": "[Forma] {n} legature di valore dell'originale interrotte a un ritornello o a una volta: le altezze non cambiano.",
+        "en": "[Form] {n} ties from the original broken at a repeat or an ending: the pitches do not change.",
+    },
+    # testi dei segni scritti in partitura
+    "segno_ds": {"it": "D.S.", "en": "D.S."},
+    "segno_ds_coda": {"it": "D.S. al Coda", "en": "D.S. al Coda"},
+    "segno_ds_fine": {"it": "D.S. al Fine", "en": "D.S. al Fine"},
+    "segno_dc": {"it": "D.C.", "en": "D.C."},
+    "segno_dc_coda": {"it": "D.C. al Coda", "en": "D.C. al Coda"},
+    "segno_dc_fine": {"it": "D.C. al Fine", "en": "D.C. al Fine"},
+    "segno_al_coda": {"it": "Al Coda", "en": "To Coda"},
+    "segno_fine": {"it": "Fine", "en": "Fine"},
     "ia_melodia": {
         "it": "IA: melodia rivista in {n} misure.",
         "en": "AI: melody revised in {n} bars.",

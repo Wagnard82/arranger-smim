@@ -3725,6 +3725,37 @@ def test_ordine_esecuzione(es):
              "volte con segni")
 
 
+ORGANICO_RIPRESA = {"flauto": 1, "violino": 1, "pianoforte": 1}
+
+
+def test_controlli_ripresa(es):
+    """Il report dice la forma riconosciuta e segnala i segni incoerenti,
+    nelle due lingue."""
+    from arranger import ripetizioni
+    from arranger.modello import SegniRipresa as S
+    sp = ingestione.ingerisci(es["volte"])
+    msg = ripetizioni.controlla(sp.misure, "it")
+    verifica(any("1-5, 1-4, 6-7" in m for m in msg), f"forma compressa: {msg}")
+    verifica(not any("Dopo il D.S./D.C." in m for m in msg), "niente convenzione senza salti")
+    sp = ingestione.ingerisci(es["ds_al_coda"])
+    verifica(any("Dopo il D.S./D.C." in m for m in ripetizioni.controlla(sp.misure, "it")),
+             "convenzione dichiarata dopo un salto")
+    ms = [Misura(i + 1, 4.0 * i, 4.0) for i in range(3)]
+    ms[1].ripresa = S(salto="ds")
+    msg = ripetizioni.controlla(ms, "en")
+    verifica(any("bar 2" in m for m in msg) and all(m.startswith("[Form]") for m in msg),
+             f"D.S. senza segno in inglese: {msg}")
+    ms = [Misura(i + 1, 4.0 * i, 4.0) for i in range(3)]
+    ms[0].ripresa = S(volte=(1,), volta_apre=True, volta_chiude="stop")
+    verifica(any("mis. 1" in m and "volta" in m for m in ripetizioni.controlla(ms, "it")),
+             "volta fuori da un ritornello")
+    verifica(ripetizioni.controlla(ingestione.ingerisci(es["inno"]).misure, "it") == [],
+             "inno: nessun messaggio")
+    r = esegui(es["volte"], Configurazione(formazione=ORGANICO_RIPRESA),
+               cartella=os.path.join(QUI, "_out"))
+    verifica(any(m.startswith("[Forma]") for m in r.report), "report della pipeline")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -3749,6 +3780,7 @@ if __name__ == "__main__":
     es = prepara_ripresa(inno)
     test_lettura_segni_ripresa(es)
     test_ordine_esecuzione(es)
+    test_controlli_ripresa(es)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

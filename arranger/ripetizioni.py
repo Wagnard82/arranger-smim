@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Set, Tuple
 
+from .lingua import t
 from .modello import Misura
 
 
@@ -137,3 +138,67 @@ def confini(misure: List[Misura]) -> Set[int]:
         elif i + 1 < n:
             fuori.add(i)
     return fuori
+
+
+def _intervalli(numeri: List[int]) -> str:
+    """[1, 2, 3, 1, 2, 6] -> "1-3, 1-2, 6"."""
+    gruppi: List[List[int]] = []
+    for x in numeri:
+        if gruppi and x == gruppi[-1][-1] + 1:
+            gruppi[-1].append(x)
+        else:
+            gruppi.append([x])
+    return ", ".join(str(g[0]) if len(g) == 1 else f"{g[0]}-{g[-1]}" for g in gruppi)
+
+
+def controlla(misure: List[Misura], lingua: str) -> List[str]:
+    """
+    Messaggi di report sui segni di ripresa: la forma riconosciuta, la
+    convenzione seguita dopo i salti e le strutture incoerenti. Un brano
+    senza segni non produce nessun messaggio.
+    """
+    if not ha_segni(misure):
+        return []
+    r_ = [m.ripresa for m in misure]
+    n = len(misure)
+    num = [m.numero for m in misure]
+    avvisi: List[str] = []
+
+    # volte senza un :| che le chiuda
+    i = 0
+    while i < n:
+        if not r_[i].volte:
+            i += 1
+            continue
+        j = i
+        while j < n and r_[j].volte:
+            j += 1
+        if not any(r_[k].ritornello_fine for k in range(i, j)):
+            avvisi.append(t("ripresa_volta_fuori", lingua, mis=num[i]))
+        i = j
+    # :| dopo un altro :| senza un |: in mezzo
+    ultimo_fine = -1
+    for i, r in enumerate(r_):
+        if r.ritornello_inizio:
+            ultimo_fine = -1
+        if r.ritornello_fine:
+            if ultimo_fine >= 0:
+                avvisi.append(t("ripresa_senza_inizio", lingua, mis=num[i]))
+            ultimo_fine = i
+    # salti senza destinazione
+    for i, r in enumerate(r_):
+        if r.salto == "ds" and not any(x.segno for x in r_):
+            avvisi.append(t("ripresa_ds_senza_segno", lingua, mis=num[i]))
+        if (r.salto and r.salto_verso == "coda"
+                and not any(x.coda for x in r_[i + 1:])):
+            avvisi.append(t("ripresa_coda_mancante", lingua, mis=num[i]))
+        if r.salto and r.salto_verso == "fine" and not any(x.fine for x in r_):
+            avvisi.append(t("ripresa_fine_mancante", lingua, mis=num[i]))
+
+    ordine, esito = ordine_con_esito(misure)
+    if esito:
+        return avvisi + [t("ripresa_lineare", lingua)]
+    righe = [t("ripresa_forma", lingua, misure=_intervalli([num[i] for i in ordine]))]
+    if any(r.salto for r in r_):
+        righe.append(t("ripresa_convenzione", lingua))
+    return righe + avvisi

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from . import (analizzatore, esportatore, ia, ingestione, interprete,
-               lilypond, orchestratore, richiesta, vincoli)
+               lilypond, orchestratore, richiesta, ripetizioni, vincoli)
 from .lingua import accompagnamento as nome_accompagnamento
 from .lingua import stile as nome_stile
 from .lingua import t as testo
@@ -43,6 +43,8 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
 
     # --- Modulo 1
     master = spartito or ingestione.ingerisci(sorgente)
+    # ritornelli, volte e salti: la forma riconosciuta va nel report
+    forma = ripetizioni.controlla(master.misure, cfg.lingua)
 
     # --- Personalizzazione a parole: PRIMA di tutto il resto, perche' puo'
     # cambiare il trasporto e i parametri che orchestrazione e IA leggono.
@@ -146,7 +148,7 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
             note_ia.append(testo("ia_staffetta", cfg.lingua))
 
     partitura = orchestratore.arrangia(master, analisi, cfg, piano_melodia=piano)
-    report = vincoli.valida(partitura, analisi.melodia, master.note)
+    report = forma + vincoli.valida(partitura, analisi.melodia, master.note)
 
     if cfg.debug_originale:
         # accodato DOPO la validazione: l'originale non va filtrato
