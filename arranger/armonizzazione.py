@@ -28,7 +28,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
-from .modello import Accordo, Nota, Spartito
+from .modello import Accordo, Misura, Nota, Spartito
 
 
 # --------------------------------------------------------------------------
@@ -499,7 +499,74 @@ def armonizza(sp: Spartito, melodia: List[Nota],
         accordi.append(Accordo(inizio=t.inizio, durata=t.fine - t.inizio,
                                fondamentale=c.fondamentale, qualita=c.qualita,
                                confidenza=0.5))
+    accordi = uniforma_ripetizioni(accordi, note, sp.misure)
     return scegli_bassi(accordi, note, pesi)
+
+
+# --------------------------------------------------------------------------
+# Frasi uguali, armonia uguale
+# --------------------------------------------------------------------------
+
+
+def uniforma_ripetizioni(accordi: List[Accordo], melodia: List[Nota],
+                         misure: List[Misura], ampiezza: int = 2) -> List[Accordo]:
+    """
+    Quando due finestre di `ampiezza` misure hanno la stessa melodia (stesse
+    note, stessi ritmi), la seconda prende gli accordi della prima: una
+    strofa o un ritornello che tornano non si armonizzano in due modi
+    diversi. L'ultima finestra resta com'e': e' la cadenza finale.
+    """
+    if len(misure) < 2 * ampiezza or not accordi:
+        return accordi
+    note = sorted(melodia, key=lambda n: n.inizio)
+
+    def firma(i: int):
+        a, b = misure[i].inizio, misure[i + ampiezza - 1].fine
+        return tuple((round(n.inizio - a, 3), n.midi, round(n.durata, 3))
+                     for n in note if a - 1e-6 <= n.inizio < b - 1e-6)
+
+    def taglia(lista: List[Accordo], a: float, b: float) -> List[Accordo]:
+        """Gli accordi dentro [a, b), ritagliati ai bordi."""
+        fuori = []
+        for x in lista:
+            i, f = max(x.inizio, a), min(x.fine, b)
+            if f > i + 1e-6:
+                fuori.append(Accordo(inizio=i, durata=f - i, fondamentale=x.fondamentale,
+                                     qualita=x.qualita, basso=x.basso,
+                                     confidenza=x.confidenza))
+        return fuori
+
+    risultato = list(accordi)
+    viste: Dict[tuple, int] = {}
+    ultima = len(misure) - ampiezza
+    i = 0
+    while i <= ultima:
+        f = firma(i)
+        if len(f) < 3:                 # troppo poca melodia per dirsi uguale
+            i += 1
+            continue
+        if f in viste and viste[f] + ampiezza <= i and i < ultima:
+            a0, b0 = misure[viste[f]].inizio, misure[viste[f] + ampiezza - 1].fine
+            a1, b1 = misure[i].inizio, misure[i + ampiezza - 1].fine
+            copia = [Accordo(inizio=x.inizio - a0 + a1, durata=x.durata,
+                             fondamentale=x.fondamentale, qualita=x.qualita,
+                             confidenza=x.confidenza)
+                     for x in taglia(risultato, a0, b0)]
+            risultato = taglia(risultato, float("-inf"), a1) + copia \
+                + taglia(risultato, b1, float("inf"))
+            i += ampiezza
+            continue
+        viste.setdefault(f, i)
+        i += 1
+    # accordi uguali consecutivi si fondono
+    fusi: List[Accordo] = []
+    for x in risultato:
+        if fusi and (fusi[-1].fondamentale, fusi[-1].qualita) == (x.fondamentale, x.qualita) \
+                and abs(fusi[-1].fine - x.inizio) < 1e-6:
+            fusi[-1].durata = x.fine - fusi[-1].inizio
+        else:
+            fusi.append(x)
+    return fusi
 
 
 # --------------------------------------------------------------------------

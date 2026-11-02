@@ -4380,6 +4380,40 @@ def test_armonia_in_piedi_stasi():
     verifica(len(acc) >= 6, f"l'armonia si muove: {len(acc)} accordi in 13 misure")
 
 
+def test_armonia_in_piedi_frasi_uguali():
+    """Due frasi con la stessa melodia ricevono gli stessi accordi: una
+    strofa che torna non si armonizza in due modi diversi."""
+    from arranger import armonizzazione as A
+    d = os.path.join(os.path.dirname(QUI), "esempi")
+    a = [[(64, 1), (64, 1), (65, 1), (67, 1)], [(67, 1), (65, 1), (64, 1), (62, 1)],
+         [(60, 1), (60, 1), (62, 1), (64, 1)], [(64, 2), (62, 2)]]
+    b = [[(69, 2), (72, 2)], [(71, 1), (69, 1), (67, 2)],
+         [(65, 1), (64, 1), (62, 1), (64, 1)], [(62, 4)]]
+    fine = [[(64, 1), (62, 1), (60, 2)], [(60, 4)]]
+    percorso = genera_esempi.melodia_nuda(os.path.join(d, "nuda_aba.xml"), "ABA",
+                                          a + b + a + fine)
+    sp = ingestione.ingerisci(percorso)
+    acc = A.armonizza(sp, analizzatore.analizza(sp).melodia)
+    def accordi_fra(t0, t1):
+        return [(round(x.inizio - t0, 3), x.fondamentale, x.qualita)
+                for x in acc if t0 - 1e-6 <= x.inizio < t1 - 1e-6]
+    prima, seconda = accordi_fra(0.0, 16.0), accordi_fra(32.0, 48.0)
+    verifica(prima == seconda, f"A e A' con gli stessi accordi: {prima} / {seconda}")
+    # la regola, direttamente: due misure con la stessa melodia prendono gli
+    # accordi della prima volta; l'ultima finestra (la cadenza) non si tocca
+    from arranger.modello import Accordo, Misura
+    N = lambda m, t, d: Nota(midi=m, inizio=t, durata=d)
+    misure = [Misura(i + 1, 4.0 * i, 4.0) for i in range(8)]
+    frase = lambda t: [N(64, t, 2), N(67, t + 2, 2), N(65, t + 4, 2), N(62, t + 6, 2)]
+    mel = frase(0) + [N(72, 8, 8)] + frase(16) + [N(60, 24, 8)]
+    acc = [Accordo(0, 4, 0, "maj"), Accordo(4, 4, 7, "maj"), Accordo(8, 8, 9, "min"),
+           Accordo(16, 4, 9, "min"), Accordo(20, 4, 5, "maj"), Accordo(24, 8, 0, "maj")]
+    fuori = A.uniforma_ripetizioni(acc, mel, misure)
+    ripresa = [(x.inizio, x.fondamentale) for x in fuori if 16 - 1e-6 <= x.inizio < 24 - 1e-6]
+    verifica(ripresa == [(16, 0), (20, 7)], f"ripetizione ricopiata: {ripresa}")
+    verifica(fuori[-1].fondamentale == 0 and fuori[-1].inizio == 24, "cadenza finale intatta")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4424,6 +4458,7 @@ if __name__ == "__main__":
     test_banco_armonia()
     test_armonia_in_piedi_inizio()
     test_armonia_in_piedi_stasi()
+    test_armonia_in_piedi_frasi_uguali()
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)
