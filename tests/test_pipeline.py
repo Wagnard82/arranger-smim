@@ -3791,6 +3791,60 @@ def test_taglio_ai_confini(es):
                      f"{parte.nome}: legatura oltre un confine a {e.inizio}")
 
 
+def _senza_ns(radice):
+    for el in radice.iter():
+        if "}" in el.tag:
+            el.tag = el.tag.split("}", 1)[1]
+    return radice
+
+
+def test_segni_nel_musicxml(es):
+    """I segni tornano nelle stesse misure, in tutte le parti; il <sound>
+    che fa eseguire i salti solo nella prima."""
+    cfg = Configurazione(formazione=ORGANICO_RIPRESA)
+    for nome in ("volte", "ds_al_coda", "dc_al_fine"):
+        r = esegui(es[nome], Configurazione(formazione=ORGANICO_RIPRESA),
+                   cartella=os.path.join(QUI, "_out"), nome_base=nome)
+        radice = _senza_ns(ET.parse(r.percorso_xml).getroot())
+        for k, parte in enumerate(radice.findall("part")):
+            mis = parte.findall("measure")
+            if nome == "volte":
+                verifica(mis[0].find("barline/repeat[@direction='forward']") is not None,
+                         f"|: parte {k}")
+                verifica(mis[4].find("barline/ending[@number='1'][@type='start']") is not None,
+                         f"apertura volta 1 parte {k}")
+                verifica(mis[4].find("barline/ending[@number='1'][@type='stop']") is not None,
+                         f"chiusura volta 1 parte {k}")
+                verifica(mis[4].find("barline/repeat[@direction='backward']") is not None,
+                         f":| parte {k}")
+                verifica(mis[5].find("barline/ending[@type='discontinue']") is not None,
+                         f"volta 2 parte {k}")
+            if nome == "ds_al_coda":
+                verifica(mis[2].find(".//segno") is not None and mis[7].find(".//coda") is not None,
+                         f"Segno e Coda parte {k}")
+                verifica(any(w.text == "D.S. al Coda" for w in mis[6].iter("words")),
+                         f"testo D.S. parte {k}")
+                verifica(any(w.text == "Al Coda" for w in mis[4].iter("words")),
+                         f"«Al Coda» dal catalogo parte {k}")
+            if nome == "dc_al_fine":
+                verifica(any(w.text == "D.C. al Fine" for w in mis[5].iter("words")),
+                         f"testo D.C. dal catalogo parte {k}")
+                verifica(any(w.text == "Fine" for w in mis[3].iter("words")),
+                         f"testo Fine parte {k}")
+            suoni = [s for m in mis for s in m.iter("sound")
+                     if set(s.attrib) & {"segno", "coda", "dalsegno", "dacapo",
+                                         "tocoda", "fine"}]
+            verifica(bool(suoni) == (k == 0 and nome != "volte"),
+                     f"<sound> solo nella prima parte ({nome}, parte {k})")
+        if nome == "ds_al_coda":
+            prima = radice.findall("part")[0].findall("measure")
+            code = [i for i, m in enumerate(prima) for s in m.iter("sound") if s.get("coda")]
+            verifica(code == [7], f"<sound coda> solo sulla Coda d'arrivo: {code}")
+    a = esegui(es["inno"], cfg, cartella=os.path.join(QUI, "_out"))
+    with open(a.percorso_xml, encoding="utf-8") as f:
+        verifica("<barline" not in f.read(), "inno senza stanghette")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -3817,6 +3871,7 @@ if __name__ == "__main__":
     test_ordine_esecuzione(es)
     test_controlli_ripresa(es)
     test_taglio_ai_confini(es)
+    test_segni_nel_musicxml(es)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

@@ -238,6 +238,12 @@ class EsportatoreMusicXML:
     def __init__(self, part: Partitura):
         self.p = part
         self._cambi = cambi_di_sigla(part.armonia)
+        # la Coda d'arrivo dei salti: la prima Coda dopo il D.S./D.C. (Dorico
+        # e MuseScore mettono il simbolo anche sulla misura del «To Coda»)
+        misure = part.misure
+        salto = next((i for i, m in enumerate(misure) if m.ripresa.salto), None)
+        self._coda_arrivo = -1 if salto is None else next(
+            (i for i in range(salto + 1, len(misure)) if misure[i].ripresa.coda), -1)
 
     # ------------------------------------------------------------------ API
     def xml(self) -> str:
@@ -323,13 +329,71 @@ class EsportatoreMusicXML:
                                  f"<beat-type>{m.den}</beat-type></time>")
                     r.append("      </attributes>")
 
+            prima = parte is self.p.parti[0]
+            r.extend(self._ripresa_inizio(m, prima, idx == self._coda_arrivo))
             for rigo in range(1, righi + 1):
                 if rigo > 1:
                     dur = _unita(m.durata)
                     r.append(f"      <backup><duration>{dur}</duration></backup>")
                 r.extend(self._voce(parte, m, rigo, righi))
+            r.extend(self._ripresa_fine(m, prima))
             r.append("    </measure>")
         r.append("  </part>")
+        return r
+
+    # ------------------------------------------------------ segni di ripresa
+    # Stanghette e testi vanno in TUTTE le parti, perche' le parti staccate
+    # devono averli; il <sound> che fa eseguire i salti solo nella prima,
+    # altrimenti i programmi di notazione salterebbero una volta per parte.
+    def _ripresa_inizio(self, m: Misura, prima: bool, coda_arrivo: bool) -> List[str]:
+        s = m.ripresa
+        r: List[str] = []
+        if s.ritornello_inizio or s.volta_apre:
+            r.append('      <barline location="left">')
+            if s.ritornello_inizio:
+                r.append("        <bar-style>heavy-light</bar-style>")
+            if s.volta_apre:
+                r.append(f'        <ending number="{_numeri_volta(s.volte)}" type="start"/>')
+            if s.ritornello_inizio:
+                r.append('        <repeat direction="forward"/>')
+            r.append("      </barline>")
+        if s.segno:
+            r += _direzione_ripresa("<segno/>", 'segno="s1"' if prima else "")
+        if s.coda:
+            r += _direzione_ripresa("<coda/>",
+                                    'coda="c1"' if prima and coda_arrivo else "")
+        return r
+
+    def _ripresa_fine(self, m: Misura, prima: bool) -> List[str]:
+        from .lingua import t as testo
+        s = m.ripresa
+        r: List[str] = []
+        if s.al_coda:
+            r += _direzione_ripresa(
+                f"<words>{escape(testo('segno_al_coda', self.p.lingua))}</words>",
+                'tocoda="c1"' if prima else "")
+        if s.fine:
+            r += _direzione_ripresa(
+                f"<words>{escape(testo('segno_fine', self.p.lingua))}</words>",
+                'fine="yes"' if prima else "")
+        if s.salto:
+            chiave = f"segno_{s.salto}" + (f"_{s.salto_verso}" if s.salto_verso else "")
+            scritta = s.testo_salto or testo(chiave, self.p.lingua)
+            suono = 'dalsegno="s1"' if s.salto == "ds" else 'dacapo="yes"'
+            r += _direzione_ripresa(f"<words>{escape(scritta)}</words>",
+                                    suono if prima else "")
+        if s.ritornello_fine or s.volta_chiude:
+            r.append('      <barline location="right">')
+            if s.ritornello_fine:
+                r.append("        <bar-style>light-heavy</bar-style>")
+            if s.volta_chiude:
+                r.append(f'        <ending number="{_numeri_volta(s.volte)}" '
+                         f'type="{s.volta_chiude}"/>')
+            if s.ritornello_fine:
+                volte = (f' times="{s.ritornello_fine}"'
+                         if s.ritornello_fine != 2 else "")
+                r.append(f'        <repeat direction="backward"{volte}/>')
+            r.append("      </barline>")
         return r
 
     def _attributi(self, parte: Parte, m: Misura, righi: int) -> List[str]:
@@ -579,6 +643,19 @@ class EsportatoreMusicXML:
         r.append("      </harmony>")
         return r
 
+
+
+def _numeri_volta(volte) -> str:
+    return ", ".join(str(v) for v in volte) or "1"
+
+
+def _direzione_ripresa(contenuto: str, suono: str) -> List[str]:
+    r = ['      <direction placement="above">',
+         f"        <direction-type>{contenuto}</direction-type>"]
+    if suono:
+        r.append(f"        <sound {suono}/>")
+    r.append("      </direction>")
+    return r
 
 
 def taglia_su_misura(eventi: List[Evento], m: Misura
