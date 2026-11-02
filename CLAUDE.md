@@ -11,7 +11,7 @@ Dorico, MuseScore o Sibelius. Il software serve all'autore (docente di
 pianoforte) come strumento di lavoro, e in prospettiva sarà venduto ai
 singoli docenti.
 
-## Stato attuale: v0.9.6 (26 ottobre 2026)
+## Stato attuale: v0.9.7 (2 novembre 2026)
 
 - **Tolto (0.9.0):** ingresso da audio (Demucs, Basic Pitch, librosa/pyin,
   beat_this, yt-dlp), da PDF/OMR e da MIDI. L'ingresso è **solo MusicXML**.
@@ -29,8 +29,17 @@ singoli docenti.
   - feedback via mail con allegati (0.9.4);
   - controllo dei file all'avvio tramite `manifesto.json` (0.9.5);
   - corno in Fa, mani del pianoforte al loro posto, due pianoforti
-    indipendenti, melodia scritta sempre usata, travature per Dorico (0.9.6).
-- **Test:** 1158 verifiche, tutte superate sulla 0.9.6.
+    indipendenti, melodia scritta sempre usata, travature per Dorico (0.9.6);
+  - principi dalle fonti in `docs/principi_arrangiamento.md` (0.9.7):
+    archi in prima posizione intera e avviso [Diteggiatura], buchi
+    nell'armonia corretti e segnalati, equilibrio di sonorità, staffetta
+    agganciata, raddoppi per famiglia, melodia al primo leggio, controcanti
+    a voci diverse, strumenti traspositori letti a suono reale,
+    personalizzazione a parole letta da un interprete a regole.
+- **Test:** 1405 verifiche, tutte superate sulla 0.9.7.
+- **IA spenta (decisione del 29/10/2026):** l'IA dell'app resta spenta per
+  ora. Tutto deve funzionare e migliorare senza API; la personalizzazione a
+  parole passa dall'interprete a regole (`interprete.py`).
 - La cartella locale `~/arranger_smim` è stata riallineata alla 0.9.5 il
   22/10/2026. I file della vecchia v0.7.2, compresi quelli della pipeline
   audio, sono archiviati in `_vecchio_v0.7.2/`. **Non sono codice attivo:**
@@ -64,6 +73,8 @@ python controllo_file.py             # verifica che i file corrispondano al mani
 
 - Segreti: `.streamlit/secrets.toml` (SMTP per il feedback, chiave
   Anthropic). Modello in `.streamlit/secrets.toml.esempio`. **Mai committarli.**
+- Per leggere i manuali scansionati: `poppler`, `ocrmypdf` e i dati di
+  Tesseract (italiano compreso), installati con Homebrew il 29/10/2026.
 - `.gitignore` esclude `.venv312/` e `_vecchio_v0.7.2/`.
 
 ## Architettura
@@ -82,6 +93,8 @@ Pipeline: **ingestione → analizzatore → orchestratore → vincoli → esport
 | `arranger/esportatore.py` / `lilypond.py` | MusicXML 4.0 + MIDI di anteprima / sorgente `.ly` |
 | `arranger/pipeline.py` | `esegui()`: dall'inizio alla fine |
 | `arranger/ia.py` | Strato IA opzionale. Il motore funziona al 100% senza |
+| `arranger/richiesta.py` | Personalizzazione a parole: parametri ammessi e validazione della risposta (IA o regole) |
+| `arranger/interprete.py` | Interprete a regole della personalizzazione, IT/EN, senza IA |
 | `arranger/frasi_music21.py` | Rilevatore di frasi avanzato, opzionale |
 | `arranger/lingua.py` | Etichette IT/EN e catalogo dei messaggi del report `t()` |
 | `arranger/testi_interfaccia.py` | Testi dell'interfaccia IT/EN `ui()` |
@@ -90,6 +103,7 @@ Pipeline: **ingestione → analizzatore → orchestratore → vincoli → esport
 | `app.py` | Interfaccia Streamlit. Controlla i file **prima** di importare il motore |
 | `controllo_file.py` + `manifesto.json` | Impronte SHA-256 dei file, contro i deploy parziali |
 | `esempi/genera_esempi.py` | Genera i MusicXML di prova usati da test e demo |
+| `docs/principi_arrangiamento.md` | Principi ricavati dalle fonti (Alfred, Rimskij-Korsakov, programmi dei colleghi), con il confronto col motore |
 
 ## Regole musicali da non violare
 
@@ -174,24 +188,31 @@ Pipeline: **ingestione → analizzatore → orchestratore → vincoli → esport
   2. aggiornare `VERSIONE_INTERFACCIA` in `app.py` e la versione nel README;
   3. eseguire `python controllo_file.py --scrivi`;
   4. eseguire tutti i test.
-- Il deploy si fa caricando **tutti** i file (`git add -A`). Un push parziale
-  ha già rotto l'app una volta (ottobre 2026).
+- Il deploy si fa caricando **tutti** i file dell'app (motore, test,
+  manifesto, `app.py`, README, `docs/`). Un push parziale ha già rotto l'app
+  una volta (ottobre 2026). Dalla 0.9.7 restano fuori per decisione
+  dell'autore `account.py`, `server.py` e `landing/` (lavori a parte) e la
+  cancellazione di `.streamlit/secrets.toml.esempio`: niente `git add -A`
+  finché non si decide diversamente.
 
 ## Prossimi passi
 
 1. ~~Collegare `~/arranger_smim` al repository GitHub~~: fatto il
    27/10/2026, 0.9.6 pubblicata (commit `706f043`).
-2. Su Streamlit Cloud la 0.9.6 parte e mostra «ScoreCraft Edu · v0.9.6»
-   (confermato dall'utente il 27/10/2026). Resta da verificare che la mail
-   di feedback arrivi con gli allegati.
+2. 0.9.7 pubblicata il 2/11/2026 (commit `b6c0a07`). Da verificare su
+   Streamlit Cloud che parta e mostri «ScoreCraft Edu · v0.9.7», e che la
+   mail di feedback arrivi con gli allegati (ancora da provare dalla 0.9.6).
 3. ~~Test dell'arrangiatore su repertorio reale~~: fatto per la 0.9.6
    (Cinema Paradiso, Dune, Can't Help Falling in Love, Let It Be).
 4. ~~Avviso «[Mani]» sul lead sheet dell'Inno alla gioia~~: risolto nella
    0.9.6 (pianoforte col ruolo di basso che scriveva il basso anche nella
    destra, più altre tre cause).
-5. Ricaricare i testi di riferimento (De La Motte, Piston, Rimskij-Korsakov),
-   che risultavano corrotti, e portarne i principi nel motore: condotta delle
-   parti, raddoppi, equilibrio timbrico.
+5. Testi di riferimento → principi nel motore. Fatti (0.9.7, vedi
+   `docs/principi_arrangiamento.md`): guida Alfred per gradi,
+   Rimskij-Korsakov (Gutenberg), programmi di violino e violoncello dei
+   colleghi. Restano: De La Motte e Piston (solo scansioni: `ocrmypdf`,
+   un capitolo alla volta), Indicazioni nazionali del DM 176/2022.
+   Scartato dall'autore: l'«economia del colore» (pause lunghe e rientri).
 6. Limiti noti, dal README:
    - i ritornelli (`<repeat>`) non vengono srotolati;
    - nessuna gestione esplicita delle modulazioni;
@@ -207,4 +228,7 @@ Pipeline: **ingestione → analizzatore → orchestratore → vincoli → esport
    riservata ad alcuni colleghi. Riconoscimento confermato funzionante su
    Streamlit Cloud il 27/10/2026. Resta da misurare memoria e tempi sui PDF
    lunghi, poi decidere come collegarlo all'arrangiatore.
-8. Corno: le estensioni per livello sono una stima; da confermare.
+8. Corno: la 1a Media (scritto Do4-Do5) coincide con Alfred grado ½; 2a e
+   3a Media restano una stima da confermare con un docente di corno.
+9. Interprete a regole della personalizzazione: allargarlo con le frasi che
+   i docenti scrivono davvero e che oggi finiscono in «Non applicato».
