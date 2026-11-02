@@ -162,6 +162,9 @@ class Pesi:
     assente: float = 1.2
     salto: float = 0.4         # cambio dentro un salto da tempo debole (P3)
     cadenza: float = 1.0       # premio di cadenza a fine frase (P11)
+    # accordo fermo mentre la melodia si muove: oltre 2 misure, oltre 4 (P10)
+    stasi: float = 0.6
+    stasi_forte: float = 2.0
 
     def costo_cambio(self, forza: int) -> float:
         return self.cambio[2 - max(0, min(2, forza))]
@@ -425,32 +428,64 @@ def armonizza(sp: Spartito, melodia: List[Nota],
     successioni = [[costo_successione(cands[p], cands[j], modo, pesi)
                     for j in range(k_c)] for p in range(k_c)]
 
-    punti = [emissioni[0][:]]
-    da: List[List[int]] = [[0] * k_c]
+    # Viterbi con lo stato (accordo, da quanti tratti e' fermo): restare
+    # sullo stesso accordo diventa caro dopo 2 misure e carissimo dopo 4, se
+    # la melodia intanto si muove (P10: il ritmo armonico e' regolare; un
+    # accordo fermo per 30 misure non "sta in piedi")
+    per_misura = max(1, round(len(tratti) / max(1, len(sp.misure))))
+    lungo, lunghissimo = 2 * per_misura, 4 * per_misura
+    R = lunghissimo + 2
+    muove = [any(t.inizio - 1e-6 <= n.inizio < t.fine - 1e-6 for n in note) for t in tratti]
+    meno = float("-inf")
+    punti = [[meno] * R for _ in range(k_c)]
+    for j in range(k_c):
+        punti[j][0] = emissioni[0][j]
+    da: List[List[List[Tuple[int, int]]]] = [[[(-1, -1)] * R for _ in range(k_c)]]
     for k in range(1, len(tratti)):
         cambio = pesi.costo_cambio(tratti[k].forza) \
             + (pesi.salto if k in salto_su else 0.0)
-        riga, prov = [], []
+        migliori = []
+        for p in range(k_c):
+            r = max(range(R), key=lambda x: punti[p][x])
+            migliori.append((punti[p][r], r))
+        nuovi = [[meno] * R for _ in range(k_c)]
+        prov = [[(-1, -1)] * R for _ in range(k_c)]
         for j in range(k_c):
-            migliore, origine = punti[-1][j], j          # stesso accordo
+            # cambio d'accordo: si arriva con un tratto di durata 1
             for p in range(k_c):
-                if p == j:
+                if p == j or migliori[p][0] == meno:
                     continue
                 costo = cambio + successioni[p][j]
                 if tenute[k] & note_acc[p] & note_acc[j]:
                     costo -= cambio * 0.5
-                valore = punti[-1][p] - costo
-                if valore > migliore:
-                    migliore, origine = valore, p
-            riga.append(migliore + emissioni[k][j])
-            prov.append(origine)
-        punti.append(riga)
+                valore = migliori[p][0] - costo
+                if valore > nuovi[j][0]:
+                    nuovi[j][0], prov[j][0] = valore, (p, migliori[p][1])
+            # stesso accordo: la durata cresce solo dove la melodia si muove
+            # (nelle pause e sulle note tenute l'accordo fermo e' naturale,
+            # e cambiare li' non deve servire ad azzerare il conto)
+            for rp in range(R):
+                if punti[j][rp] == meno:
+                    continue
+                r = min(rp + 1, R - 1) if muove[k] else rp
+                stasi = 0.0
+                if muove[k]:
+                    stasi += pesi.stasi if rp + 2 > lungo else 0.0
+                    stasi += pesi.stasi_forte if rp + 2 > lunghissimo else 0.0
+                valore = punti[j][rp] - stasi
+                if valore > nuovi[j][r]:
+                    nuovi[j][r], prov[j][r] = valore, (j, rp)
+            for r in range(R):
+                if nuovi[j][r] != meno:
+                    nuovi[j][r] += emissioni[k][j]
+        punti = nuovi
         da.append(prov)
 
-    j = max(range(k_c), key=lambda x: punti[-1][x])
+    j, r = max(((j, r) for j in range(k_c) for r in range(R)),
+               key=lambda x: punti[x[0]][x[1]])
     scelte = [j]
     for k in range(len(tratti) - 1, 0, -1):
-        j = da[k][j]
+        j, r = da[k][j][r]
         scelte.append(j)
     scelte.reverse()
 
@@ -523,8 +558,10 @@ def scegli_bassi(accordi: List[Accordo], melodia: List[Nota],
         a = accordi[i]
         radice = a.fondamentale
         n = len(accordi)
-        # cadenza finale: V - I in stato fondamentale (P11)
-        if i == n - 1 or (i == n - 2 and (accordi[-1].fondamentale - radice) % 12 == 5):
+        # il brano comincia in stato fondamentale (cominciare in rivolto e'
+        # rarissimo) e la cadenza finale V - I e' in stato fondamentale (P11)
+        if i == 0 or i == n - 1 \
+                or (i == n - 2 and (accordi[-1].fondamentale - radice) % 12 == 5):
             return [radice]
         pc = a.note_accordo()
         return [radice, pc[1]] if len(pc) > 1 else [radice]

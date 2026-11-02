@@ -4349,6 +4349,37 @@ def test_banco_armonia():
              f"le sigle contro se stesse: {perfetto}")
 
 
+def test_armonia_in_piedi_inizio():
+    """Il primo accordo in stato fondamentale: cominciare in primo rivolto e'
+    rarissimo (osservazione del docente, 2/11/2026)."""
+    from arranger import armonizzazione as A
+    from arranger.modello import Accordo
+    N = lambda m, t, d: Nota(midi=m, inizio=t, durata=d)
+    # Do - Sol - Do (Let It Be): dal Mi al Sol il basso farebbe una terza,
+    # dal Do una quinta, e il primo rivolto vinceva
+    acc = [Accordo(0, 2, 0, "maj"), Accordo(2, 2, 7, "maj"), Accordo(4, 4, 0, "maj")]
+    mel = [N(67, 0, 2), N(67, 2, 2), N(64, 4, 4)]
+    fuori = A.scegli_bassi(acc, mel, A.Pesi())
+    verifica(fuori[0].basso is None, f"primo accordo in stato fondamentale: {fuori[0]}")
+
+
+def test_armonia_in_piedi_stasi():
+    """Ritmo armonico minimo: se la melodia si muove, nessun accordo resta
+    fermo piu' di 4 misure (Let It Be teneva il Do per 34 misure)."""
+    from arranger import armonizzazione as A
+    d = os.path.join(os.path.dirname(QUI), "esempi")
+    giro = [[(64, 1), (62, 1), (60, 1), (62, 1)], [(64, 2), (67, 2)],
+            [(69, 1), (67, 1), (64, 1), (62, 1)], [(60, 2), (64, 2)]]
+    percorso = genera_esempi.melodia_nuda(os.path.join(d, "nuda_pentatonica.xml"),
+                                          "Pentatonica", giro * 3 + [[(60, 4)]])
+    sp = ingestione.ingerisci(percorso)
+    acc = A.armonizza(sp, analizzatore.analizza(sp).melodia)
+    piu_lungo = max(a.durata for a in acc) / 4.0
+    verifica(piu_lungo <= 4.0, f"nessun accordo oltre 4 misure: {piu_lungo} "
+             f"{[(a.inizio, a.fondamentale) for a in acc]}")
+    verifica(len(acc) >= 6, f"l'armonia si muove: {len(acc)} accordi in 13 misure")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4391,6 +4422,8 @@ if __name__ == "__main__":
     test_rivolti()
     test_report_tonalita_proposta(es_arm)
     test_banco_armonia()
+    test_armonia_in_piedi_inizio()
+    test_armonia_in_piedi_stasi()
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)
