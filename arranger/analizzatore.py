@@ -525,17 +525,71 @@ def armonia_dalle_sigle(sp: Spartito) -> List[Accordo]:
         accordi.append(Accordo(inizio=t, durata=fine - t,
                                fondamentale=fondamentale, qualita=qualita,
                                basso=basso, confidenza=1.0))
-    # una sigla vale fino alla successiva: si riempiono i buchi fra le misure
+    # una sigla vale fino alla successiva: si riempiono i buchi fra le misure.
+    # Il riempimento e' una DEDUZIONE, non una sigla scritta: se in quella
+    # misura l'accompagnamento dell'originale suona tutt'altro accordo (la
+    # sigla che manca sul primo tempo, per esempio), comanda cio' che suona.
+    rilevata: Optional[List[Accordo]] = None
     completi: List[Accordo] = []
+    tenuti: List[Accordo] = []      # i prolungamenti, non le sigle scritte
     for i, acc in enumerate(accordi):
         completi.append(acc)
         prossimo = accordi[i + 1].inizio if i + 1 < len(accordi) else sp.durata_totale
-        if prossimo > acc.fine + 1e-6:
-            completi.append(Accordo(inizio=acc.fine, durata=prossimo - acc.fine,
-                                    fondamentale=acc.fondamentale,
-                                    qualita=acc.qualita, basso=acc.basso,
-                                    confidenza=1.0))
+        t = acc.fine
+        while prossimo > t + 1e-6:
+            m = sp.misura_a(t)
+            t1 = min(prossimo, m.fine) if m is not None and m.fine > t + 1e-6 \
+                else prossimo
+            tenuto = Accordo(inizio=t, durata=t1 - t,
+                             fondamentale=acc.fondamentale,
+                             qualita=acc.qualita, basso=acc.basso,
+                             confidenza=1.0)
+            if _sigla_smentita(sp, tenuto):
+                if rilevata is None:
+                    rilevata = rileva_armonia(sp)
+                completi.extend(_ritaglia(rilevata, t, t1))
+            else:
+                if completi and any(x is completi[-1] for x in tenuti) \
+                        and abs(completi[-1].fine - t) < 1e-6:
+                    completi[-1].durata += tenuto.durata
+                else:
+                    completi.append(tenuto)
+                    tenuti.append(tenuto)
+            t = t1
     return completi
+
+
+def _sigla_smentita(sp: Spartito, acc: Accordo) -> bool:
+    """
+    Vero se l'accompagnamento scritto nel tratto suona per lo piu' note
+    estranee all'accordo `acc`. Vale solo dove un accompagnamento c'e':
+    nel lead sheet la sola melodia non basta a smentire una sigla.
+    """
+    if sp.tipo == "lead_sheet":
+        return False
+    note = [n for n in sp.note_in(acc.inizio, acc.fine)
+            if sp.parte_solista is None or n.origine != sp.parte_solista]
+    if not note:
+        return False
+    pesi = _pesi_classi(note, acc.inizio, acc.fine)
+    totale = sum(pesi.values())
+    pcs = {(acc.fondamentale + i) % 12 for i in _MODELLI[acc.qualita]}
+    if acc.basso is not None:
+        pcs.add(acc.basso)
+    dentro = sum(w for pc, w in pesi.items() if pc in pcs)
+    return totale > 0 and dentro / totale < 0.5
+
+
+def _ritaglia(accordi: List[Accordo], t0: float, t1: float) -> List[Accordo]:
+    """Gli accordi di `accordi` ristretti all'intervallo [t0, t1)."""
+    fuori: List[Accordo] = []
+    for a in accordi:
+        a0, a1 = max(a.inizio, t0), min(a.fine, t1)
+        if a1 > a0 + 1e-6:
+            fuori.append(Accordo(inizio=a0, durata=a1 - a0,
+                                 fondamentale=a.fondamentale, qualita=a.qualita,
+                                 basso=a.basso, confidenza=a.confidenza))
+    return fuori
 
 
 # Gradi fra cui sceglie l'armonizzazione di una melodia nuda, con la loro
@@ -767,14 +821,38 @@ def rileva_basso(sp: Spartito, armonia: List[Accordo]) -> List[Nota]:
         if limite > n.fine + 1e-6:
             n.durata = limite - n.inizio
 
+    # un basso tenuto attraverso un cambio d'accordo, se non appartiene al
+    # nuovo accordo, si spezza li': prima suonava sotto l'armonia nuova (Mib
+    # tenuto sotto Do7). La nota nuova e' il grave scritto in quel punto, se
+    # c'e'; altrimenti la sostituisce la fondamentale qui sotto.
+    spezzata: List[Nota] = []
+    for n in linea:
+        for a in armonia:
+            if not (n.inizio + 1e-6 < a.inizio < n.fine - 1e-6) \
+                    or n.midi % 12 in a.note_accordo() or n.midi % 12 == a.basso:
+                continue
+            fine = n.fine
+            n.durata = a.inizio - n.inizio
+            spezzata.append(n)
+            attacca = [x for x in gravi if abs(x.inizio - a.inizio) < 1e-6]
+            n = Nota(midi=min(attacca, key=lambda x: x.midi).midi
+                     if attacca else n.midi,
+                     inizio=a.inizio, durata=fine - a.inizio, rigo=2)
+        spezzata.append(n)
+    linea = spezzata
+
     # le note estranee all'armonia diventano la fondamentale (regola richiesta)
     fuori: List[Nota] = []
     for n in linea:
         acc = next((a for a in armonia
                     if a.inizio - 1e-6 <= n.inizio < a.fine - 1e-6), None)
         midi = n.midi
-        if acc is not None and midi % 12 not in acc.note_accordo():
-            candidate = [o * 12 + acc.fondamentale for o in range(1, 7)]
+        if acc is not None and midi % 12 not in acc.note_accordo() \
+                and not (acc.confidenza == 1.0 and midi % 12 == acc.basso):
+            # nei rivolti scritti dalla sigla (Sib/Do) la nota dopo la barra
+            classe = acc.basso if acc.confidenza == 1.0 and acc.basso is not None \
+                else acc.fondamentale
+            candidate = [o * 12 + classe for o in range(1, 7)]
             midi = min(candidate, key=lambda c: abs(c - n.midi))
         fuori.append(Nota(midi=midi, inizio=n.inizio, durata=n.durata, rigo=2))
     return fuori

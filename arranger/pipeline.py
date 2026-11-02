@@ -8,8 +8,8 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from . import (analizzatore, esportatore, ia, ingestione, lilypond,
-               orchestratore, vincoli)
+from . import (analizzatore, esportatore, ia, ingestione, interprete,
+               lilypond, orchestratore, richiesta, vincoli)
 from .lingua import accompagnamento as nome_accompagnamento
 from .lingua import stile as nome_stile
 from .lingua import t as testo
@@ -43,13 +43,32 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
 
     # --- Modulo 1
     master = spartito or ingestione.ingerisci(sorgente)
+
+    # --- Personalizzazione a parole: PRIMA di tutto il resto, perche' puo'
+    # cambiare il trasporto e i parametri che orchestrazione e IA leggono.
+    # Se le impostazioni arrivano gia' interpretate (richiesta_applicata),
+    # il modello non si richiama: lo stesso file da' lo stesso arrangiamento.
+    # Senza IA (o se il modello non risponde) la legge l'interprete a regole:
+    # capisce meno, ma sempre allo stesso modo e senza costi.
+    note_ia: List[str] = []
+    if cfg.richiesta.strip() and cfg.richiesta_applicata is None:
+        id_parti = {p.id: p.nome for p in orchestratore.costruisci_parti(cfg)}
+        dati = None
+        if cfg.ia_attiva("richiesta") and ia.disponibile():
+            dati = ia.interpreta_richiesta(cfg, id_parti, master.titolo)
+            if dati is None:
+                note_ia.append(testo("richiesta_fallita", cfg.lingua,
+                                     errore=ia.ULTIMO_ERRORE or "-"))
+        if dati is None:
+            dati = interprete.interpreta(cfg.richiesta, id_parti, cfg.lingua)
+        note_ia.extend(richiesta.applica(cfg, dati, id_parti))
+
     if cfg.trasporto:
         trasporta(master, cfg.trasporto)
 
     # --- Modulo 3.1
     analisi = analizzatore.analizza(master)
 
-    note_ia: List[str] = []
     riferimenti = None
     if cfg.usa_ia and ia.disponibile():
         # ogni blocco controlla da se' il proprio interruttore (cfg.ia_*)
@@ -127,7 +146,7 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
             note_ia.append(testo("ia_staffetta", cfg.lingua))
 
     partitura = orchestratore.arrangia(master, analisi, cfg, piano_melodia=piano)
-    report = vincoli.valida(partitura)
+    report = vincoli.valida(partitura, analisi.melodia, master.note)
 
     if cfg.debug_originale:
         # accodato DOPO la validazione: l'originale non va filtrato

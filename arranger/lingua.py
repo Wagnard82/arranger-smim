@@ -180,9 +180,68 @@ def accompagnamento(chiave: str, lingua: str = "it") -> str:
     return chiave
 
 
-def nota(midi: int, lingua: str = "it") -> str:
+BEMOLLI_IT = ["Do", "Reb", "Re", "Mib", "Mi", "Fa", "Solb", "Sol", "Lab", "La", "Sib", "Si"]
+BEMOLLI_EN = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+
+
+def nota(midi: int, lingua: str = "it", bemolli: bool = False) -> str:
+    """Nome della nota con l'ottava. Con `bemolli` le alterazioni si scrivono
+    col bemolle (Sib4 invece di La#4), come nelle tonalita' coi bemolli."""
     from .modello import nome_en, nome_it
+    if bemolli:
+        nomi = BEMOLLI_EN if valida(lingua) == "en" else BEMOLLI_IT
+        return f"{nomi[midi % 12]}{midi // 12 - 1}"
     return nome_en(midi) if valida(lingua) == "en" else nome_it(midi)
+
+
+_PARAMETRI = {
+    "it": {"stile": "stile", "strumenti_melodia": "strumenti della melodia",
+           "staffetta_melodia": "staffetta della melodia",
+           "cambio_solista": "cambio di solista",
+           "misure_minime_solista": "misure minime per solista",
+           "raddoppi_melodia": "raddoppi della melodia",
+           "riempi_silenzi": "nessuno fermo a lungo",
+           "silenzio_massimo_misure": "pausa massima (misure)",
+           "trasporto": "trasporto (semitoni)", "modo": "modo"},
+    "en": {"stile": "style", "strumenti_melodia": "melody instruments",
+           "staffetta_melodia": "melody relay",
+           "cambio_solista": "soloist change",
+           "misure_minime_solista": "minimum bars per soloist",
+           "raddoppi_melodia": "melody doublings",
+           "riempi_silenzi": "nobody idle for long",
+           "silenzio_massimo_misure": "longest rest (bars)",
+           "trasporto": "transposition (semitones)", "modo": "mode"},
+}
+_VALORI = {
+    "it": {True: "si'", False: "no", "auto": "automatico", "frase": "a ogni frase",
+           "periodo": "a ogni periodo", "sezione": "a ogni sezione",
+           "melodico": "melodia e accompagnamento", "tessitura": "per registri"},
+    "en": {True: "yes", False: "no", "auto": "automatic", "frase": "every phrase",
+           "periodo": "every period", "sezione": "every section",
+           "melodico": "melody and accompaniment", "tessitura": "by register"},
+}
+
+
+def nome_parametro(chiave: str, lingua: str = "it") -> str:
+    """Nome leggibile di un parametro della configurazione (report)."""
+    return _PARAMETRI[valida(lingua)].get(chiave, chiave)
+
+
+def valore_parametro(chiave: str, valore, lingua: str = "it",
+                     id_parti: Optional[Dict[str, str]] = None) -> str:
+    """Valore leggibile di un parametro: stili e scelte tradotti, le parti
+    per nome."""
+    lingua = valida(lingua)
+    if chiave == "stile":
+        return stile(valore, lingua)
+    if chiave == "strumenti_melodia":
+        if not valore:
+            return _VALORI[lingua]["auto"]
+        return ", ".join(nome_parte_da_id(x, lingua) for x in valore)
+    # attenzione: 1 == True per Python, un trasporto di 1 non e' un «si'»
+    if isinstance(valore, bool) or (isinstance(valore, str) and valore in _VALORI[lingua]):
+        return _VALORI[lingua][valore]
+    return f"{valore:+d}" if chiave == "trasporto" and isinstance(valore, int) else str(valore)
 
 
 def ottave(n: int, lingua: str = "it") -> str:
@@ -227,6 +286,10 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
         "it": "[Alterazioni] {parte}, mis. {mis}: nota alterata non prevista in {livello} -> ricondotta alla tonalita'.",
         "en": "[Accidentals] {parte}, bar {mis}: accidental not expected at {livello} -> brought back into the key.",
     },
+    "semitoni": {
+        "it": "[Semitoni] {parte}, mis. {mis}: {n} note a un semitono da una nota dell'originale -> spostate su una nota che non stride.",
+        "en": "[Semitones] {parte}, bar {mis}: {n} notes a semitone away from a note of the original -> moved to a note that does not clash.",
+    },
     "accordo_non_diteggiabile": {
         "it": "[Idiomatico] {parte}, mis. {mis}: accordo non diteggiabile -> ridotto alla fondamentale (resta la sigla).",
         "en": "[Idiomatic] {parte}, bar {mis}: chord not playable -> reduced to the root (the chord symbol stays).",
@@ -267,6 +330,26 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
         "it": "[Respiro] {parte}: {n} punti in cui la parte e' stata accorciata per far respirare (massimo {limite:g} quarti di fila).",
         "en": "[Breathing] {parte}: {n} places shortened to allow a breath (at most {limite:g} beats in a row).",
     },
+    "buco_riempito": {
+        "it": "[Armonia] {parte}, mis. {misure}: accompagnamento abbassato di un'ottava per riempire il vuoto nel registro medio.",
+        "en": "[Harmony] {parte}, bars {misure}: accompaniment moved down an octave to fill the gap in the middle register.",
+    },
+    "buco_sinistra": {
+        "it": "[Armonia] {parte}, mis. {misure}: la sinistra aggiunge una nota dell'accordo sopra il basso per riempire il registro medio.",
+        "en": "[Harmony] {parte}, bars {misure}: the left hand adds a chord tone above the bass to fill the middle register.",
+    },
+    "buco_basso": {
+        "it": "[Armonia] Basso staccato dalle altre voci (oltre un'ottava e una quinta). Misure segnalate: {n} ({misure}). Es. mis. {mis}: {grave} e sopra subito {acuta}. Si puo' avvicinare il basso o riempire il registro medio.",
+        "en": "[Harmony] Bass far from the other voices (more than an octave and a fifth). Bars flagged: {n} ({misure}). E.g. bar {mis}: {grave} with {acuta} directly above. Move the bass closer or fill the middle register.",
+    },
+    "buco_centro": {
+        "it": "[Armonia] Vuoto di oltre un'ottava fra le voci superiori. Misure segnalate: {n} ({misure}). Es. mis. {mis}: niente fra {grave} e {acuta}. Si puo' riempire con una voce interna.",
+        "en": "[Harmony] Gap of more than an octave between the upper voices. Bars flagged: {n} ({misure}). E.g. bar {mis}: nothing between {grave} and {acuta}. Fill it with an inner voice.",
+    },
+    "note_scomode": {
+        "it": "[Diteggiatura] {parte}: note scomode in {livello} ({note}), {n} in tutto. Lasciate come sono, da controllare a mano: mis. {misure}",
+        "en": "[Fingering] {parte}: awkward notes at {livello} ({note}), {n} in total. Left unchanged, check by hand: bars {misure}",
+    },
     # ---- orchestratore
     "ingresso_lead_sheet": {
         "it": "[Ingresso] lead sheet riconosciuto: la melodia e' quella scritta, basso e accompagnamento sono costruiti dalle {n} sigle del file. Il basso suona la fondamentale di ogni accordo (o la nota dopo la barra, nei rivolti come C/E).",
@@ -299,6 +382,70 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
     "silenzi": {
         "it": "[Silenzi] {parte}: {n} pause lunghe riempite con l'accompagnamento.",
         "en": "[Rests] {parte}: {n} long rests filled with accompaniment.",
+    },
+    "ruoli_leggii": {
+        "it": "[Ruoli] {primo} e {secondo}: ruoli scambiati, la parte piu' esposta va al primo leggio.",
+        "en": "[Roles] {primo} and {secondo}: roles swapped, the more exposed part goes to the first desk.",
+    },
+    "staffetta_primi_leggii": {
+        "it": "[Staffetta] Frasi in cui la melodia passa dal secondo al primo leggio: {n}. Le seconde parti la raddoppiano, non la portano da sole.",
+        "en": "[Relay] Phrases where the melody moves from the second to the first desk: {n}. Second parts double it, never carry it alone.",
+    },
+    "regola_sintesi": {
+        "it": "Richiesta letta senza IA: {n} indicazioni su {totale} riconosciute.",
+        "en": "Request read without AI: {n} of {totale} instructions recognised.",
+    },
+    "regola_non_capita": {
+        "it": "frase non riconosciuta: con l'IA attiva si capisce di piu'",
+        "en": "not recognised: with the AI switched on more is understood",
+    },
+    "regola_livello": {
+        "it": "il livello si sceglie nel pannello a sinistra",
+        "en": "the grade is chosen in the left panel",
+    },
+    "regola_organico": {
+        "it": "l'organico si sceglie nel pannello a sinistra",
+        "en": "the ensemble is chosen in the left panel",
+    },
+    "regola_manca": {
+        "it": "non c'e' nell'organico: {strumenti}",
+        "en": "not in the ensemble: {strumenti}",
+    },
+    "richiesta_sintesi": {
+        "it": "[Richiesta] {testo}",
+        "en": "[Request] {testo}",
+    },
+    "richiesta_applicata": {
+        "it": "[Richiesta] {cosa}: {valore}.",
+        "en": "[Request] {cosa}: {valore}.",
+    },
+    "richiesta_valore": {
+        "it": "[Richiesta] {cosa}: valore «{valore}» non ammesso, lasciato com'era.",
+        "en": "[Request] {cosa}: value «{valore}» not allowed, left unchanged.",
+    },
+    "richiesta_scartata": {
+        "it": "[Richiesta] «{cosa}» non e' un'impostazione del motore: ignorata.",
+        "en": "[Request] «{cosa}» is not an engine setting: ignored.",
+    },
+    "richiesta_non_applicabile": {
+        "it": "[Richiesta] Non applicato: {cosa}",
+        "en": "[Request] Not applied: {cosa}",
+    },
+    "richiesta_nulla": {
+        "it": "[Richiesta] Nessuna impostazione da cambiare: l'arrangiamento resta quello di base.",
+        "en": "[Request] No setting to change: the arrangement stays the default one.",
+    },
+    "richiesta_fallita": {
+        "it": "[Richiesta] Il modello non ha risposto in modo utilizzabile (errore: {errore}): la richiesta e' stata letta senza IA.",
+        "en": "[Request] The model did not give a usable answer (error: {errore}): the request was read without AI.",
+    },
+    "staffetta_aggancio": {
+        "it": "[Staffetta] Passaggi della melodia agganciati con una nota in comune: {n}. Chi cede la melodia suona anche la prima nota di chi la riceve.",
+        "en": "[Relay] Melody hand-overs linked by a shared note: {n}. The outgoing instrument also plays the first note of the incoming one.",
+    },
+    "equilibrio": {
+        "it": "[Equilibrio] {parte}: copriva la melodia, diradato e in piano nelle misure {misure}.",
+        "en": "[Balance] {parte}: was covering the melody, thinned out and played piano in bars {misure}.",
     },
     "solista_alleggerito": {
         "it": "[Solista] {parte}: accompagnamento alleggerito nei tratti in cui porta la melodia ({n} tratti).",

@@ -155,6 +155,37 @@ def _classifica_parti(parti: List[ET.Element]) -> Tuple[str, Optional[int]]:
     return "pianistico", None
 
 
+def _trasposizione(attrs: Optional[ET.Element]) -> Optional[int]:
+    """
+    Semitoni da aggiungere alle note SCRITTE per avere il suono reale, letti
+    da <transpose> (chromatic + 12 * octave-change): -2 per il clarinetto in
+    Si bemolle, -7 per il corno in Fa, -9 per il sax contralto. None se gli
+    attributi non dicono nulla, cosi' resta valida l'indicazione precedente.
+    """
+    if attrs is None:
+        return None
+    tr = attrs.find("./{*}transpose")
+    if tr is None:
+        return None
+    cromatico = int(float(_testo(tr.find("./{*}chromatic"), "0")))
+    ottava = int(float(_testo(tr.find("./{*}octave-change"), "0")))
+    return cromatico + 12 * ottava
+
+
+def _armatura_reale(fifths: int, trasposizione: int) -> int:
+    """Armatura scritta di una parte traspositrice -> armatura reale (in
+    Do): il clarinetto in Si bemolle scrive Re maggiore (2) per Do (0)."""
+    scarto = (trasposizione * 7) % 12
+    if scarto > 6:
+        scarto -= 12
+    reale = fifths + scarto
+    if reale > 7:
+        reale -= 12
+    elif reale < -7:
+        reale += 12
+    return reale
+
+
 def _griglia_misure(parti: List[ET.Element]) -> List[Tuple[float, int, int, int, bool]]:
     """
     Prima passata: calcola la durata REALE di ogni misura su tutte le parti.
@@ -177,6 +208,7 @@ def _griglia_misure(parti: List[ET.Element]) -> List[Tuple[float, int, int, int,
     for parte in parti:
         divisioni = 480.0
         num, den, fifths = 4, 4, 0
+        trasposizione = 0
         for m_idx, mis in enumerate(parte.findall("./{*}measure")):
             attrs = mis.find("./{*}attributes")
             if attrs is not None:
@@ -187,9 +219,16 @@ def _griglia_misure(parti: List[ET.Element]) -> List[Tuple[float, int, int, int,
                 if t is not None:
                     num = int(_testo(t.find("./{*}beats"), str(num)))
                     den = int(_testo(t.find("./{*}beat-type"), str(den)))
+                tr = _trasposizione(attrs)
+                if tr is not None:
+                    trasposizione = tr
                 k = attrs.find("./{*}key")
                 if k is not None:
-                    fifths = int(_testo(k.find("./{*}fifths"), str(fifths)))
+                    # l'armatura di una parte traspositrice e' quella SCRITTA:
+                    # si riporta in Do, altrimenti la tonalita' del brano
+                    # dipendeva dall'ordine delle parti nel file
+                    fifths = _armatura_reale(
+                        int(_testo(k.find("./{*}fifths"), "0")), trasposizione)
             metri.setdefault(m_idx, (num, den, fifths))
             metri[m_idx] = (num, den, fifths)
             if mis.get("implicit") == "yes":
@@ -305,6 +344,11 @@ def da_musicxml(percorso: str) -> Spartito:
 
     for idx_parte, parte in enumerate(parti):
         divisioni = 480.0
+        # strumento traspositore (clarinetto, corno, sax, tromba...): le note
+        # e le sigle del file sono SCRITTE, il motore ragiona a suono reale.
+        # Senza questa correzione la melodia di un clarinetto in Si bemolle
+        # arrivava un tono sopra l'armonia del pianoforte.
+        trasposizione = 0
         for m_idx, mis in enumerate(parte.findall("./{*}measure")):
             if m_idx >= len(misure):
                 break
@@ -314,6 +358,9 @@ def da_musicxml(percorso: str) -> Spartito:
                 d = attrs.find("./{*}divisions")
                 if d is not None and _testo(d):
                     divisioni = float(_testo(d))
+            tr = _trasposizione(attrs)
+            if tr is not None:
+                trasposizione = tr
 
             cursore = 0.0
             ultimo_inizio = 0.0
@@ -333,8 +380,13 @@ def da_musicxml(percorso: str) -> Spartito:
                                        if scarto is not None else 0.0)
                         istante = max(offset_misura,
                                       offset_misura + cursore + spostamento)
+                        fond, qual, basso = letta
+                        if trasposizione:
+                            fond = (fond + trasposizione) % 12
+                            basso = (None if basso is None
+                                     else (basso + trasposizione) % 12)
                         sigle_per_parte.setdefault(idx_parte, []).append(
-                            (istante, letta[0], letta[1], letta[2]))
+                            (istante, fond, qual, basso))
                 if t == "direction" and idx_parte == 0:
                     din = _dinamica(el)
                     if din:
@@ -369,7 +421,8 @@ def da_musicxml(percorso: str) -> Spartito:
                             step = _testo(p.find("./{*}step"), "C")
                             alter = int(float(_testo(p.find("./{*}alter"), "0")))
                             octv = int(_testo(p.find("./{*}octave"), "4"))
-                            midi = (octv + 1) * 12 + PASSI.get(step, 0) + alter
+                            midi = ((octv + 1) * 12 + PASSI.get(step, 0) + alter
+                                    + trasposizione)
                             rigo = int(_testo(el.find("./{*}staff"), "1"))
                             if tipo_spartito == "solista_e_piano":
                                 # il solista sta sul rigo superiore, il

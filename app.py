@@ -133,7 +133,7 @@ def valore(widget, nome: str, etichetta: str, predefinito, **kw):
 # sul server e' di un'altra versione — succede caricando su GitHub solo una
 # parte dei file — l'app non deve partire con un errore incomprensibile a
 # meta' esecuzione, ma dire subito che cosa manca.
-VERSIONE_INTERFACCIA = "0.9.6"
+VERSIONE_INTERFACCIA = "0.9.7"
 if VERSIONE != VERSIONE_INTERFACCIA:
     st.error(T("file_non_allineati", ui=VERSIONE_INTERFACCIA, motore=VERSIONE))
     st.stop()
@@ -385,6 +385,10 @@ with PRINCIPALE:
                                      "ls": "esempio_ls"}[k]),
             help=T("esempio_aiuto"))
 
+    richiesta_testo = st.text_area(T("richiesta_titolo"), height=90,
+                                   placeholder=T("richiesta_esempio"),
+                                   help=T("richiesta_aiuto"))
+
     avvia = st.button(T("genera"), type="primary", use_container_width=True)
 
     # ==========================================================================
@@ -423,7 +427,8 @@ with PRINCIPALE:
                              silenzio_massimo_misure=silenzio_max,
                              misure_minime_solista=minimo_solista,
                              debug_originale=debug, usa_ia=usa_ia,
-                             modello_ia=modello_ia, lingua=lng)
+                             modello_ia=modello_ia, lingua=lng,
+                             richiesta=richiesta_testo.strip())
         for funzione in ia.FUNZIONI:
             setattr(cfg, f"ia_{funzione}", funzione in funzioni_ia)
 

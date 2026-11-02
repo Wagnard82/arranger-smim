@@ -12,6 +12,10 @@ Filtri di validazione applicati alle bozze generate dall'Orchestrator:
   6. Filtro Idiomatico   - diteggiature chitarra, prima posizione archi,
                            apertura della mano al pianoforte
 
+In coda, `avviso_note_scomode` segnala (senza correggerle) le note scomode
+per il livello, es. violino in 1a Media fuori dalle prime due applicazioni,
+e `avviso_buchi_armonia` i vuoti nella disposizione dell'orchestra intera.
+
 Ogni intervento e' registrato in `partitura.report` con il numero di misura.
 """
 
@@ -20,7 +24,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 from .modello import Evento, Misura, Parte, Partitura
-from .lingua import etichetta_livello, ottave
+from .lingua import etichetta_livello, nota, ottave
 from .lingua import t as testo
 from .strumenti import (Livello, Strumento, livello, livello_parte,
                         nome_livello_parte, strumento)
@@ -75,6 +79,14 @@ def _misura_di(misure: List[Misura], t: float) -> str:
         if m.inizio - 1e-6 <= t < m.fine - 1e-6:
             return "levare" if m.anacrusi else str(m.numero)
     return "?"
+
+
+def _armatura_a(misure: List[Misura], t: float) -> int:
+    """Armatura (circolo delle quinte) della misura che contiene `t`."""
+    for m in misure:
+        if m.inizio - 1e-6 <= t < m.fine - 1e-6:
+            return m.tonalita
+    return misure[-1].tonalita if misure else 0
 
 
 def _tonica(misure: List[Misura]) -> int:
@@ -347,6 +359,72 @@ def filtro_alterazioni(part: Partitura) -> None:
                         nome_livello_parte(p.livello, part.livello),
                         part.lingua, breve=True)))
             e.altezze = sorted(set(nuove))
+
+
+# Una nota dell'originale "conta" per il controllo dei semitoni se non e'
+# una nota di passaggio: le crome veloci della melodia sfiorano di semitono
+# qualunque accordo, ed e' normale.
+SEMITONO_DURATA_MINIMA = 0.5
+
+
+def filtro_semitoni(part: Partitura, originale: Optional[List] = None) -> None:
+    """
+    Le note SCRITTE dall'arrangiatore non devono stare a un semitono (o a una
+    nona minore) da una nota che nell'originale suona nello stesso momento.
+    Succede quando la sigla del file dice una cosa e il pianoforte un'altra:
+    Sib/Do scritto, Do-Mi-Sol-Sib suonato; il Fa della sigla, dato a un
+    flauto, cade sopra il Mi del pianoforte. Nell'originale quell'attrito non
+    c'e'.
+
+    La nota si sposta di un semitono o di un tono verso una nota che non
+    stride con nessuna di quelle che suonano, preferendo una nota che
+    l'originale suona davvero (Fa -> Mi). Restano intatte la melodia, il
+    materiale `letterale` e le note che l'originale stesso suona in quel
+    punto: in un Do maj7 scritto e suonato il Si contro il Do e' voluto.
+    """
+    if not originale:
+        return
+    lunghe = [n for n in originale if n.durata >= SEMITONO_DURATA_MINIMA - 1e-6]
+    for p in part.parti:
+        if p.ruolo == "melodia" or strumento(p.strumento).percussione:
+            continue
+        misure: List[str] = []
+        spostate = 0
+        for e in p.eventi:
+            if e.pausa or e.letterale:
+                continue
+            fine = e.inizio + e.durata
+            sonanti = {n.midi % 12 for n in lunghe
+                       if min(n.fine, fine) - max(n.inizio, e.inizio)
+                       >= 0.5 * min(n.durata, e.durata) - 1e-6}
+            if not sonanti:
+                continue
+
+            def stride(m: int) -> bool:
+                return m % 12 not in sonanti and any(
+                    (m - pc) % 12 in (1, 11) for pc in sonanti)
+
+            nuove = []
+            for midi in e.altezze:
+                if not stride(midi):
+                    nuove.append(midi)
+                    continue
+                candidate = [c for c in (midi - 1, midi + 1, midi - 2, midi + 2)
+                             if not stride(c)]
+                candidate.sort(key=lambda c: (c % 12 not in sonanti,
+                                              abs(c - midi), c))
+                if candidate:
+                    nuove.append(candidate[0])
+                    spostate += 1
+                    mis = _misura_di(part.misure, e.inizio)
+                    if mis not in misure:
+                        misure.append(mis)
+                else:
+                    nuove.append(midi)
+            e.altezze = sorted(set(nuove))
+        if spostate:
+            part.report.append(testo("semitoni", part.lingua, parte=p.nome,
+                                     mis=", ".join(misure), n=spostate))
 
 
 # --------------------------------------------------------------------------
@@ -742,11 +820,356 @@ def filtro_respiro(part: Partitura) -> None:
                                      n=accorciate, limite=limite))
 
 
-def valida(part: Partitura) -> List[str]:
-    """Esegue tutti i filtri nell'ordine corretto e restituisce il report."""
+def avviso_note_scomode(part: Partitura) -> None:
+    """
+    Segnala le note che stanno nell'estensione ma sono scomode a quel livello
+    (per il violino in 1a Media: 1o dito basso e 3o dito alto, che non fanno
+    parte della prima e seconda applicazione). Solo un avviso: le note NON si
+    cambiano, nemmeno fuori dalla melodia, finche' la regola non e'
+    confermata dai docenti. Vale anche per il materiale letterale, proprio
+    perche' e' quello che i filtri non toccano.
+    """
+    for p in part.parti:
+        st = strumento(p.strumento)
+        chiave_liv = nome_livello_parte(p.livello, part.livello)
+        scomode = set(st.note_scomode.get(chiave_liv, ()))
+        if not scomode:
+            continue
+        trovate = [(e, a) for e in p.eventi if not e.pausa
+                   for a in e.altezze if a in scomode]
+        if not trovate:
+            continue
+        misure: List[str] = []
+        nomi: Dict[str, int] = {}
+        for e, a in trovate:
+            m = _misura_di(part.misure, e.inizio)
+            if m not in misure:
+                misure.append(m)
+            # il nome segue l'armatura della misura: Sib4 in Fa maggiore,
+            # La#4 in Si maggiore (e nei toni senza alterazioni)
+            nomi.setdefault(nota(a, part.lingua,
+                                 bemolli=_armatura_a(part.misure, e.inizio) < 0), a)
+        elenco = ", ".join(misure[:8]) + (", ..." if len(misure) > 8 else "")
+        note = ", ".join(sorted(nomi, key=lambda n: (nomi[n], n)))
+        part.report.append(testo(
+            "note_scomode", part.lingua, parte=p.nome, n=len(trovate),
+            livello=etichetta_livello(chiave_liv, part.lingua, breve=True),
+            note=note, misure=elenco))
+
+
+# Buchi nell'armonia (Rimskij-Korsakov, cap. III: disposizione larga in
+# basso e stretta in alto, niente vuoti fra le voci). In semitoni.
+BUCO_BASSO = 19     # dal basso alla voce sopra: oltre un'ottava e una quinta
+BUCO_CENTRO = 12    # fra due voci superiori vicine: oltre un'ottava
+PIANO = ("ppp", "pp", "p")
+
+
+def _dinamica_a(p: Parte, t: float) -> Optional[str]:
+    """Ultimo segno dinamico della parte prima di `t` (None se non ce n'e')."""
+    segnati = [e for e in p.eventi if e.dinamica and e.inizio <= t + 1e-6]
+    return max(segnati, key=lambda e: e.inizio).dinamica if segnati else None
+
+
+def _parti_armonia(part: Partitura) -> List[Parte]:
+    # glockenspiel e metallofono sono colore, non voci dell'armonia: un loro
+    # suono isolato in acuto non e' un buco (e le percussioni non hanno altezza)
+    return [p for p in part.parti
+            if strumento(p.strumento).famiglia != "percussioni"]
+
+
+def _battiti(m: Misura) -> List[float]:
+    return [m.inizio + k for k in range(int(round(m.durata)) or 1)]
+
+
+def _buchi_al_battito(parti: List[Parte], t: float) -> Dict[str, Tuple[int, int]]:
+    """
+    Buchi nella disposizione al battito `t`: {"basso": (grave, acuta)} se il
+    basso e' staccato dalla voce sopra, {"centro": (grave, acuta)} se fra due
+    voci superiori vicine c'e' un vuoto. Nel piano non si segnala niente.
+    """
+    suonano = [(p, a) for p in parti for e in p.eventi
+               if not e.pausa and e.inizio - 1e-6 <= t < e.fine - 1e-6
+               for a in e.altezze]
+    altezze = sorted({a for _, a in suonano})
+    if len(altezze) < 2:
+        return {}
+    if all(_dinamica_a(p, t) in PIANO for p in {id(p): p for p, _ in suonano}.values()):
+        return {}
+    # il basso raddoppiato all'ottava sotto resta UNA voce: si parte dalla
+    # nota piu' acuta del gruppo
+    k = 0
+    while k + 1 < len(altezze) and altezze[k + 1] - altezze[k] == 12:
+        k += 1
+    if k + 1 >= len(altezze):
+        return {}
+    buchi: Dict[str, Tuple[int, int]] = {}
+    if altezze[k + 1] - altezze[k] > BUCO_BASSO:
+        buchi["basso"] = (altezze[k], altezze[k + 1])
+    for x, y in zip(altezze[k + 1:], altezze[k + 2:]):
+        if y - x > BUCO_CENTRO:
+            buchi["centro"] = (x, y)
+            break
+    return buchi
+
+
+def _buchi_misura(parti: List[Parte], m: Misura) -> Dict[str, Tuple[int, int]]:
+    """Buchi della misura: contano solo se ci sono in almeno meta' dei
+    battiti (le note di passaggio non bastano). Ritorna un esempio per tipo."""
+    battiti = _battiti(m)
+    conti: Dict[str, int] = {}
+    esempio: Dict[str, Tuple[int, int]] = {}
+    for t in battiti:
+        for tipo, coppia in _buchi_al_battito(parti, t).items():
+            conti[tipo] = conti.get(tipo, 0) + 1
+            esempio.setdefault(tipo, coppia)
+    return {tipo: esempio[tipo] for tipo, n in conti.items()
+            if n * 2 >= len(battiti)}
+
+
+def _battiti_con_buchi(parti: List[Parte], misure: List[Misura]) -> int:
+    """Quanti (battito, tipo di buco) ci sono in queste misure: la misura
+    della qualita' della disposizione usata dalla correzione."""
+    return sum(len(_buchi_al_battito(parti, t))
+               for m in misure for t in _battiti(m))
+
+
+def _melodici(eventi: List[Evento], melodia: List) -> bool:
+    """True se gli eventi seguono la melodia (raddoppio): la maggior parte
+    suona la stessa nota, a meno dell'ottava, della melodia in quel momento."""
+    if not eventi or not melodia:
+        return False
+    uguali = 0
+    for e in eventi:
+        n = next((n for n in melodia
+                  if n.inizio - 1e-6 <= e.inizio < n.inizio + n.durata - 1e-6), None)
+        if n is not None and any(a % 12 == n.midi % 12 for a in e.altezze):
+            uguali += 1
+    return uguali * 5 >= len(eventi) * 3      # almeno il 60%
+
+
+def _prova_spostamento(part: Partitura, parti: List[Parte], p: Parte,
+                       a: float, b: float, melodia: List) -> Optional[List[Evento]]:
+    """
+    Eventi di `p` fra `a` e `b` se si possono abbassare di un'ottava senza
+    violare le regole; altrimenti None. Si sposta solo l'accompagnamento:
+    niente melodia (ne' raddoppi), niente materiale letterale, niente
+    pianoforte (le mani hanno i loro filtri).
+    """
+    if p.ruolo == "melodia" or p.righi > 1:
+        return None
+    st = strumento(p.strumento)
+    eventi = [e for e in p.eventi if not e.pausa and a - 1e-6 <= e.inizio < b - 1e-6]
+    if not eventi or any(e.letterale for e in eventi) or _melodici(eventi, melodia):
+        return None
+    chiave_liv = nome_livello_parte(p.livello, part.livello)
+    lo, hi = st.ambito(chiave_liv)
+    if any(x - 12 < lo for e in eventi for x in e.altezze):
+        return None
+    for e in eventi:
+        nuova_min = min(e.altezze) - 12
+        nuova_max = max(e.altezze) - 12
+        altri = [x for q in parti if q is not p for f in q.eventi
+                 if not f.pausa and f.inizio - 1e-6 <= e.inizio < f.fine - 1e-6
+                 for x in f.altezze]
+        # non deve diventare il basso
+        if not altri or nuova_min <= min(altri):
+            return None
+        # i leggii successivi dello stesso strumento non salgono sopra
+        dopo = False
+        for q in parti:
+            if q is p:
+                dopo = True
+                continue
+            if not dopo or q.strumento != p.strumento:
+                continue
+            sopra = [x for f in q.eventi if not f.pausa
+                     and f.inizio - 1e-6 <= e.inizio < f.fine - 1e-6 for x in f.altezze]
+            if sopra and max(sopra) > nuova_max:
+                return None
+    # salti d'ingresso e d'uscita entro il limite del livello
+    L = livello_parte(p.livello, part.livello)
+    prima = [e for e in p.eventi if not e.pausa and e.fine <= a + 1e-6]
+    dopo_ev = [e for e in p.eventi if not e.pausa and e.inizio >= b - 1e-6]
+    if prima and abs(max(prima[-1].altezze) - (max(eventi[0].altezze) - 12)) > L.salto_massimo:
+        return None
+    if dopo_ev and abs(max(dopo_ev[0].altezze) - (max(eventi[-1].altezze) - 12)) > L.salto_massimo:
+        return None
+    return eventi
+
+
+def _nota_per_la_sinistra(acc, basso: int, apertura: int, tetto: int) -> Optional[int]:
+    """
+    Nota dell'accordo da aggiungere sopra il basso della sinistra: la piu'
+    alta che sta nella mano. Prima la fondamentale o la quinta, poi la terza;
+    mai la settima (va risolta) ne' un raddoppio del basso (Rimskij: il basso
+    dei rivolti non si raddoppia nelle voci superiori).
+    """
+    if acc is None:
+        return None
+    pcs = acc.note_accordo()
+    fond, terza = pcs[0], pcs[1]
+    quinta = pcs[2] if len(pcs) > 2 else None
+    for scelta in ([fond, quinta], [terza]):
+        ammesse = {pc for pc in scelta if pc is not None and pc != basso % 12}
+        candidate = [x for x in range(basso + 3, min(basso + apertura, tetto) + 1)
+                     if x % 12 in ammesse]
+        if candidate:
+            return max(candidate)
+    return None
+
+
+def _riempi_con_sinistra(part: Partitura, parti: List[Parte],
+                         blocco: List[Misura], melodia: List) -> Optional[Parte]:
+    """
+    Riempie il buco sopra il basso con la sinistra del pianoforte: a ogni
+    accordo della sinistra si aggiunge una nota dell'accordo entro
+    l'apertura della mano del livello (una quinta, una sesta; la decima non
+    entra nella mano ai nostri livelli). Si tiene solo se i buchi calano.
+    """
+    a, b = blocco[0].inizio, blocco[-1].fine
+    prima = _battiti_con_buchi(parti, blocco)
+    for p in parti:
+        if p.strumento != "pianoforte" or p.righi != 2 or p.ruolo == "melodia":
+            continue
+        L = livello_parte(p.livello, part.livello)
+        sinistra = [e for e in p.eventi if e.rigo == 2 and not e.pausa
+                    and a - 1e-6 <= e.inizio < b - 1e-6]
+        if not sinistra or any(e.letterale for e in sinistra) \
+                or _melodici(sinistra, melodia):
+            continue
+        aggiunte = []
+        for e in sinistra:
+            if len(e.altezze) >= L.accordi_max:
+                continue
+            destra = [x for f in p.eventi if f.rigo == 1 and not f.pausa
+                      and f.inizio - 1e-6 <= e.inizio < f.fine - 1e-6 for x in f.altezze]
+            tetto = min([AMBITO_MANI[2][1]] + [x - 1 for x in destra])
+            nuova = _nota_per_la_sinistra(_accordo_a(part, e.inizio), min(e.altezze),
+                                          L.tastiera_max_semitoni, tetto)
+            if nuova is not None and nuova not in e.altezze:
+                aggiunte.append((e, list(e.altezze)))
+                e.altezze = sorted(e.altezze + [nuova])
+        if aggiunte and _battiti_con_buchi(parti, blocco) < prima:
+            return p
+        for e, vecchie in aggiunte:
+            e.altezze = vecchie
+    return None
+
+
+def correggi_buchi_armonia(part: Partitura, melodia: Optional[List] = None) -> None:
+    """
+    Riempie i buchi della disposizione (vedi `_buchi_al_battito`) abbassando
+    di un'ottava una voce d'accompagnamento che sta sopra il buco, per un
+    blocco intero di misure consecutive: spostarla misura per misura
+    creerebbe salti d'ottava a ogni stanghetta.
+
+    Si abbassa e non si alza perche' cosi' i leggii secondari non superano
+    mai il primo; il basso non si alza, perche' toglierebbe profondita' (per
+    Rimskij-Korsakov il basso si raddoppia sotto, e si riempie il mezzo).
+    Fra i candidati si sceglie quello che toglie piu' buchi; al massimo due
+    spostamenti per blocco. La melodia e i suoi raddoppi non si toccano.
+
+    Dove il basso resta staccato anche dopo, prova la sinistra del pianoforte
+    (vedi `_riempi_con_sinistra`).
+    """
+    melodia = melodia or []
+    parti = _parti_armonia(part)
+    for blocco in _blocchi(part, [m for m in part.misure if _buchi_misura(parti, m)]):
+        a, b = blocco[0].inizio, blocco[-1].fine
+        for _ in range(2):
+            prima = _battiti_con_buchi(parti, blocco)
+            if not prima:
+                break
+            migliore = None
+            for p in parti:
+                eventi = _prova_spostamento(part, parti, p, a, b, melodia)
+                if eventi is None:
+                    continue
+                for e in eventi:
+                    e.altezze = [x - 12 for x in e.altezze]
+                dopo = _battiti_con_buchi(parti, blocco)
+                for e in eventi:
+                    e.altezze = [x + 12 for x in e.altezze]
+                if dopo < prima and (migliore is None or dopo < migliore[0]):
+                    migliore = (dopo, p, eventi)
+            if migliore is None:
+                break
+            _, p, eventi = migliore
+            for e in eventi:
+                e.altezze = [x - 12 for x in e.altezze]
+            part.report.append(testo(
+                "buco_riempito", part.lingua, parte=p.nome,
+                misure=_intervallo_misure(part, blocco)))
+
+    # poi, dove il basso resta staccato, la sinistra del pianoforte aggiunge
+    # una nota dell'accordo sopra il basso
+    for blocco in _blocchi(part, [m for m in part.misure
+                                  if "basso" in _buchi_misura(parti, m)]):
+        p = _riempi_con_sinistra(part, parti, blocco, melodia)
+        if p is not None:
+            part.report.append(testo(
+                "buco_sinistra", part.lingua, parte=p.nome,
+                misure=_intervallo_misure(part, blocco)))
+
+
+def _blocchi(part: Partitura, misure: List[Misura]) -> List[List[Misura]]:
+    """Raggruppa misure consecutive."""
+    blocchi: List[List[Misura]] = []
+    for m in misure:
+        if blocchi and abs(blocchi[-1][-1].fine - m.inizio) < 1e-6:
+            blocchi[-1].append(m)
+        else:
+            blocchi.append([m])
+    return blocchi
+
+
+def _intervallo_misure(part: Partitura, blocco: List[Misura]) -> str:
+    misure = [_misura_di(part.misure, m.inizio) for m in blocco]
+    return misure[0] if len(misure) == 1 else f"{misure[0]}-{misure[-1]}"
+
+
+def avviso_buchi_armonia(part: Partitura) -> None:
+    """
+    Segnala le misure in cui l'insieme suona ancora «vuoto» (dopo
+    `correggi_buchi_armonia`): il basso troppo lontano dalla voce sopra, o un
+    vuoto di oltre un'ottava fra le voci superiori. Si guarda l'orchestra
+    intera, battito per battito, perche' ogni parte dispone i suoi accordi per
+    conto proprio. Solo un avviso: nessuna nota cambia.
+
+    Una misura e' segnalata quando il buco c'e' in almeno meta' dei battiti.
+    Nel piano i vuoti sono tollerati: si salta il battito se tutte le parti
+    che suonano sono in p, pp o ppp.
+    """
+    parti = _parti_armonia(part)
+    trovati: Dict[str, List[Tuple[str, int, int]]] = {"basso": [], "centro": []}
+    for m in part.misure:
+        for tipo, (x, y) in _buchi_misura(parti, m).items():
+            trovati[tipo].append((_misura_di(part.misure, m.inizio), x, y))
+    for tipo, elenco in trovati.items():
+        if not elenco:
+            continue
+        misure = [x[0] for x in elenco]
+        mis_es, a, b = elenco[0]
+        t0 = next((m.inizio for m in part.misure
+                   if _misura_di(part.misure, m.inizio) == mis_es), 0.0)
+        bemolli = _armatura_a(part.misure, t0) < 0
+        part.report.append(testo(
+            f"buco_{tipo}", part.lingua, n=len(misure),
+            misure=", ".join(misure[:8]) + (", ..." if len(misure) > 8 else ""),
+            mis=mis_es, grave=nota(a, part.lingua, bemolli=bemolli),
+            acuta=nota(b, part.lingua, bemolli=bemolli)))
+
+def valida(part: Partitura, melodia: Optional[List] = None,
+           originale: Optional[List] = None) -> List[str]:
+    """Esegue tutti i filtri nell'ordine corretto e restituisce il report.
+    `melodia` (le note della melodia dall'analisi) serve a riconoscere i
+    raddoppi della melodia, che la correzione dei buchi non deve spostare.
+    `originale` (le note dello spartito, a suono reale) serve al controllo
+    dei semitoni contro cio' che l'originale suona."""
     filtro_polifonia(part)
     filtro_estensione(part)
     filtro_alterazioni(part)
+    filtro_semitoni(part, originale)
     filtro_salti(part)
     filtro_idiomatico(part)
     filtro_mani(part)
@@ -755,6 +1178,9 @@ def valida(part: Partitura) -> List[str]:
     filtro_estensione(part)     # secondo passaggio dopo le modifiche idiomatiche
     filtro_ritmico(part)
     filtro_respiro(part)
+    correggi_buchi_armonia(part, melodia)
+    avviso_note_scomode(part)   # solo report: non cambia nessuna nota
+    avviso_buchi_armonia(part)  # solo report: non cambia nessuna nota
     for p in part.parti:
         p.eventi.sort(key=lambda e: (e.rigo, e.inizio))
     return part.report

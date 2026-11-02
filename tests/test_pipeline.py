@@ -771,6 +771,434 @@ def test_solista_debole(inno):
              "il solista e' rimasto in dinamica debole")
 
 
+def test_solista_debole_ripristina_dinamica():
+    """
+    Sotto un solista debole l'accompagnamento scende in piano, ma alla fine
+    del tratto torna alla dinamica di prima: prima restava in piano fino al
+    segno successivo della partitura.
+    """
+    from types import SimpleNamespace
+    from arranger.modello import Evento, Parte, Partitura
+    from arranger.orchestratore import alleggerisci_per_solista
+
+    misure = [Misura(numero=k + 1, inizio=4.0 * k, durata=4.0) for k in range(4)]
+    analisi = SimpleNamespace(melodia=[Nota(midi=64, inizio=float(k), durata=1.0)
+                                       for k in range(8)])
+    chit = Parte(id="chitarra1", nome="Chitarra", abbrev="Chit.", strumento="chitarra",
+                 ruolo="melodia", eventi=[Evento(float(k), 1.0, [64]) for k in range(8)])
+    vl = Parte(id="violino1", nome="Violino", abbrev="Vl.", strumento="violino",
+               ruolo="armonia",
+               eventi=[Evento(4.0 * k, 4.0, [60, 67], dinamica="f" if k == 0 else None)
+                       for k in range(4)])
+    part = Partitura(parti=[chit, vl], misure=misure)
+    alleggerisci_per_solista(part, analisi)
+    dinamiche = [e.dinamica for e in vl.eventi]
+    verifica(dinamiche == ["p", None, "f", None],
+             f"dinamica non ripristinata dopo il solista: {dinamiche}")
+
+
+def test_staffetta_nota_in_comune(inno):
+    """
+    Passaggio della melodia (Rimskij-Korsakov, cap. IV): chi cede la melodia
+    suona anche la prima nota di chi la riceve, nella sua ottava. Niente
+    aggancio se la frase dopo resta alla stessa parte, dopo un respiro lungo
+    o fuori estensione.
+    """
+    from arranger.modello import Evento
+    from arranger.orchestratore import nota_di_aggancio
+
+    melodia = [Nota(midi=m, inizio=float(k), durata=1.0)
+               for k, m in enumerate([67, 69, 71, 72, 74, 72, 71, 69])]
+    frasi = [(0.0, 4.0), (4.0, 8.0)]
+    # il flauto canta la prima frase un'ottava sopra
+    linea = [Evento(float(k), 1.0, [m + 12]) for k, m in enumerate([67, 69, 71, 72])]
+    staffetta = {0: ["flauto1"], 1: ["violino1"]}
+    e = nota_di_aggancio(linea, melodia, frasi, 0, staffetta, "flauto1", (60, 96))
+    verifica(e is not None and e.inizio == 4.0 and e.altezze == [86],
+             f"nota in comune: {e and (e.inizio, e.altezze)}")
+    verifica(nota_di_aggancio(linea, melodia, frasi, 0, {0: ["flauto1"], 1: ["flauto1"]},
+                              "flauto1", (60, 96)) is None,
+             "aggancio senza passaggio di melodia")
+    lontana = melodia[:4] + [Nota(midi=74, inizio=6.0, durata=2.0)]
+    verifica(nota_di_aggancio(linea, lontana, [(0.0, 4.0), (6.0, 8.0)], 0, staffetta,
+                              "flauto1", (60, 96)) is None,
+             "aggancio dopo un respiro lungo")
+    # fuori estensione nell'ottava del flauto: si prende l'ottava sotto
+    e = nota_di_aggancio(linea, melodia, frasi, 0, staffetta, "flauto1", (60, 84))
+    verifica(e is not None and e.altezze == [74], f"ottava di ripiego: {e and e.altezze}")
+    verifica(nota_di_aggancio(linea, melodia, frasi, 0, staffetta, "flauto1", (60, 70))
+             is None, "aggancio fuori estensione")
+
+    # sul brano intero gli agganci avvengono e finiscono nel report
+    cfg = Configurazione(formazione={"flauto": 2, "clarinetto": 1, "violino": 2,
+                                     "violoncello": 1, "pianoforte": 1},
+                         livello="2a Media", stile="Normale")
+    r = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"), nome_base="aggancio")
+    verifica(any(x.startswith("[Staffetta] Passaggi") for x in r.report),
+             "nessun passaggio della melodia agganciato sull'Inno")
+
+
+def test_raddoppi_per_famiglia():
+    """
+    Il raddoppio della melodia si sceglie per impasto (Rimskij-Korsakov):
+    legni con legni e archi con archi; mai chi copre chi canta (la tromba su
+    un flauto); archi e ottoni solo se non c'e' altro. A parita', l'ordine
+    d'idoneita'.
+    """
+    from arranger.modello import Parte
+    from arranger.orchestratore import scegli_raddoppio
+
+    def p(strum, n=1):
+        return Parte(id=f"{strum}{n}", nome=f"{strum} {n}", abbrev=strum, strumento=strum)
+
+    fl, fl2, cl, vl, vl2, tr, cr = (p("flauto"), p("flauto", 2), p("clarinetto"),
+                                    p("violino"), p("violino", 2), p("tromba"), p("corno"))
+    casi = [
+        (fl, [tr, vl, cl], cl, "flauto: il clarinetto prima di violino e tromba"),
+        (fl, [tr, vl], vl, "flauto: il violino, non la tromba che lo coprirebbe"),
+        (vl, [tr, fl, vl2], vl2, "violino: il secondo violino"),
+        (vl, [tr, cr], cr, "violino: il corno prima della tromba"),
+        (fl, [cr, vl], vl, "flauto: il violino prima del corno, che prevarrebbe"),
+        (cr, [vl, fl], fl, "corno: un legno (corno + flauto)"),
+        (tr, [vl, cl, cr], cl, "tromba: un legno (tromba + clarinetto)"),
+        (fl, [cl, fl2], cl, "a parita' conta l'ordine d'idoneita'"),
+        (fl, [tr], tr, "se c'e' solo la tromba, la tromba"),
+    ]
+    for capo, candidati, atteso, cosa in casi:
+        scelto = scegli_raddoppio(capo, candidati)
+        verifica(scelto is atteso, f"{cosa}: scelto {scelto and scelto.nome}")
+    verifica(scegli_raddoppio(fl, []) is None, "raddoppio senza candidati")
+
+
+def test_controcanti_a_voci_diverse(inno):
+    """
+    Con piu' parti di controcanto la prima tiene la linea e le altre
+    scendono di una e due note dell'accordo: prima suonavano tutte la stessa
+    linea e il registro medio restava vuoto (Cinema Paradiso, 1a Media).
+    """
+    from types import SimpleNamespace
+    from arranger.modello import Accordo
+    from arranger.orchestratore import linea_controcanto
+
+    analisi = SimpleNamespace(
+        armonia=[Accordo(inizio=0.0, durata=4.0, fondamentale=0, qualita="maj"),
+                 Accordo(inizio=4.0, durata=4.0, fondamentale=7, qualita="maj")],
+        melodia=[Nota(midi=76, inizio=0.0, durata=4.0), Nota(midi=74, inizio=4.0, durata=4.0)])
+    vl = strumento("violino")
+    voci = [[e.altezze[0] for e in linea_controcanto(analisi, vl, "3a Media", "Normale", voce=k)]
+            for k in range(3)]
+    # le voci sotto saltano la nota della melodia (Mi, poi Re): non la
+    # raddoppiano
+    verifica(voci == [[67, 71], [60, 67], [55, 59]], f"voci del controcanto: {voci}")
+    # la seconda voce, in un'estensione che sotto non ha spazio, sale fra la
+    # prima voce e la melodia invece di raddoppiare la prima
+    fl = strumento("flauto")
+    stretta = [e.altezze[0] for e in linea_controcanto(analisi, fl, "1a Media", "Normale", voce=1)]
+    prima = [e.altezze[0] for e in linea_controcanto(analisi, fl, "1a Media", "Normale")]
+    verifica(all(a != b for a, b in zip(prima, stretta)),
+             f"seconda voce all'unisono con la prima: {prima} {stretta}")
+
+    # sul brano: due parti di controcanto non suonano piu' la stessa linea
+    cfg = Configurazione(formazione={"flauto": 2, "clarinetto": 2, "violino": 2,
+                                     "violoncello": 1},
+                         livello="1a Media", stile="Normale")
+    r = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"), nome_base="controcanti")
+    contro = [p for p in r.partitura.parti if p.ruolo == "controcanto"
+              and strumento(p.strumento).famiglia != "percussioni"]
+    verifica(len(contro) >= 2, f"servono due controcanti: {[p.nome for p in contro]}")
+    if len(contro) >= 2:
+        a, b = ([(e.inizio, tuple(e.altezze)) for e in p.eventi if not e.pausa]
+                for p in contro[:2])
+        uguali = len(set(a) & set(b))
+        verifica(uguali * 2 < max(1, min(len(a), len(b))),
+                 f"{contro[0].nome} e {contro[1].nome}: {uguali} note identiche "
+                 f"su {min(len(a), len(b))}")
+
+
+def _xml_solista_traspositore(nome, cromatico, ottava, fifths_scritte, note_scritte,
+                              sigla_scritta, piano_prima=False):
+    """MusicXML minimo: una parte traspositrice (note e sigla SCRITTE) e un
+    pianoforte in Do, una misura di 4/4."""
+    passi = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+    nomi = "C C D D E F F G G A A B".split()
+    alterazioni = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0]
+
+    def nota(midi, dur=1, staff=None, chord=False):
+        pc = midi % 12
+        alt = f"<alter>{alterazioni[pc]}</alter>" if alterazioni[pc] else ""
+        return (f"<note>{'<chord/>' if chord else ''}<pitch><step>{nomi[pc]}</step>{alt}"
+                f"<octave>{midi // 12 - 1}</octave></pitch><duration>{dur}</duration>"
+                f"<voice>1</voice>{f'<staff>{staff}</staff>' if staff else ''}</note>")
+
+    radice, alter_s = sigla_scritta
+    solista = (
+        '<part id="S"><measure number="1"><attributes><divisions>1</divisions>'
+        f'<key><fifths>{fifths_scritte}</fifths></key><time><beats>4</beats>'
+        '<beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef>'
+        f'<transpose><diatonic>0</diatonic><chromatic>{cromatico}</chromatic>'
+        f'<octave-change>{ottava}</octave-change></transpose></attributes>'
+        f'<harmony><root><root-step>{radice}</root-step><root-alter>{alter_s}</root-alter>'
+        '</root><kind>major</kind></harmony>'
+        + "".join(nota(m) for m in note_scritte) + '</measure></part>')
+    piano = (
+        '<part id="P"><measure number="1"><attributes><divisions>1</divisions>'
+        '<key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type>'
+        '</time><staves>2</staves></attributes>'
+        + nota(60, 4, 1) + nota(64, 4, 1, chord=True) + nota(67, 4, 1, chord=True)
+        + '<backup><duration>4</duration></backup>' + nota(48, 4, 2)
+        + '</measure></part>')
+    elenco = ('<part-list><score-part id="S"><part-name>' + nome + '</part-name></score-part>'
+              '<score-part id="P"><part-name>Piano</part-name></score-part></part-list>')
+    corpo = piano + solista if piano_prima else solista + piano
+    return ('<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0">'
+            + elenco + corpo + '</score-partwise>')
+
+
+def test_solista_traspositore():
+    """
+    Solista + pianoforte con il solista scritto in trasposizione
+    (<transpose>): note, sigle e armatura si leggono a SUONO REALE. Prima le
+    note di un clarinetto in Si bemolle arrivavano un tono sopra l'armonia
+    del pianoforte e la tonalita' dipendeva dall'ordine delle parti.
+    """
+    import tempfile
+    from arranger import ingestione
+    cartella = tempfile.mkdtemp()
+    # clarinetto in Sib: scritto Re maggiore, Mi4 Fa#4 Sol4 La4 -> reale Re4 Mi4 Fa4 Sol4
+    casi = [("Clarinetto in Sib", -2, 0, 2, [64, 66, 67, 69], ("D", 0), [62, 64, 65, 67], 0),
+            # corno in Fa: scritto Sol maggiore, Sol4 La4 Si4 Do5 -> reale Do4 Re4 Mi4 Fa4
+            ("Corno in Fa", -7, 0, 1, [67, 69, 71, 72], ("G", 0), [60, 62, 64, 65], 0),
+            # sax tenore: nona maggiore sotto (chromatic -2, octave-change -1)
+            ("Sax tenore", -2, -1, 2, [74, 76, 78, 79], ("D", 0), [60, 62, 64, 65], 0)]
+    for nome, cromatico, ottava, fifths, scritte, sigla, reali, radice_reale in casi:
+        for piano_prima in (False, True):
+            percorso = os.path.join(cartella, f"{nome}_{piano_prima}.xml")
+            with open(percorso, "w", encoding="utf-8") as f:
+                f.write(_xml_solista_traspositore(nome, cromatico, ottava, fifths,
+                                                  scritte, sigla, piano_prima))
+            sp = ingestione.ingerisci(percorso)
+            ordine = "pianoforte prima" if piano_prima else "solista prima"
+            verifica(sp.tipo == "solista_e_piano", f"{nome}, {ordine}: tipo {sp.tipo}")
+            solo = sorted((n.inizio, n.midi) for n in sp.note if n.origine == sp.parte_solista)
+            verifica([m for _, m in solo] == reali,
+                     f"{nome}, {ordine}: note {[m for _, m in solo]} invece di {reali}")
+            verifica(sp.misure[0].tonalita == 0,
+                     f"{nome}, {ordine}: armatura {sp.misure[0].tonalita} invece di 0 (Do)")
+            verifica([x[1] for x in sp.sigle] == [radice_reale],
+                     f"{nome}, {ordine}: sigla {sp.sigle} invece di Do")
+    # e senza <transpose> nulla cambia (flauto, violino, voce)
+    percorso = os.path.join(cartella, "flauto.xml")
+    with open(percorso, "w", encoding="utf-8") as f:
+        f.write(_xml_solista_traspositore("Flauto", 0, 0, 0, [62, 64, 65, 67], ("C", 0))
+                .replace("<transpose><diatonic>0</diatonic><chromatic>0</chromatic>"
+                         "<octave-change>0</octave-change></transpose>", ""))
+    sp = ingestione.ingerisci(percorso)
+    verifica(sorted(n.midi for n in sp.note if n.origine == sp.parte_solista) == [62, 64, 65, 67],
+             "flauto in Do letto male")
+
+
+def test_melodia_al_primo_leggio():
+    """
+    Nelle orchestre scolastiche le seconde parti sono le piu' deboli: la
+    melodia va sempre al primo leggio. Se la distribuzione la da' al Flauto 2
+    e il controcanto al Flauto 1, i ruoli si scambiano; nella staffetta un
+    secondo leggio non canta mai da solo. Restano le scelte del docente: un
+    secondo leggio di livello piu' alto, o scelto a mano come solista.
+    """
+    from arranger.modello import Parte
+    from arranger.orchestratore import melodia_ai_primi_leggii, staffetta_ai_primi_leggii
+
+    def parti(livelli=(None, None)):
+        def p(strum, n, ruolo, liv=None):
+            return Parte(id=f"{strum}{n}", nome=f"{strum} {n}", abbrev=strum,
+                         strumento=strum, ruolo=ruolo, variante=n - 1, livello=liv)
+        return [p("flauto", 1, "controcanto", livelli[0]), p("flauto", 2, "melodia", livelli[1]),
+                p("violino", 1, "melodia"), p("violino", 2, "melodia"),
+                p("pianoforte", 1, "basso"), p("pianoforte", 2, "armonia")]
+
+    cfg = Configurazione(formazione={"flauto": 2, "violino": 2, "pianoforte": 2},
+                         livello="3a Media")
+    pp = parti()
+    rep = melodia_ai_primi_leggii(pp, cfg)
+    ruoli = {p.id: p.ruolo for p in pp}
+    verifica(ruoli["flauto1"] == "melodia" and ruoli["flauto2"] == "controcanto",
+             f"flauti non scambiati: {ruoli}")
+    verifica(ruoli["pianoforte1"] == "basso" and ruoli["pianoforte2"] == "armonia",
+             f"pianoforti toccati: {ruoli}")
+    verifica(len(rep) == 1 and rep[0].startswith("[Ruoli] flauto 1 e flauto 2"),
+             f"report: {rep}")
+
+    staffetta = {0: ["violino2"], 1: ["violino2", "violino1"], 2: ["flauto2", "violino1"],
+                 3: ["violino1"]}
+    n = staffetta_ai_primi_leggii(staffetta, pp, cfg)
+    verifica(staffetta == {0: ["violino1"], 1: ["violino2", "violino1"],
+                           2: ["flauto1", "violino1"], 3: ["violino1"]} and n == 2,
+             f"staffetta: {staffetta} ({n} frasi)")
+
+    # il docente ha messo al secondo leggio un allievo piu' avanti: niente scambi
+    pp = parti(livelli=("1a Media", "3a Media"))
+    melodia_ai_primi_leggii(pp, cfg)
+    verifica({p.id: p.ruolo for p in pp}["flauto2"] == "melodia",
+             "scambiato un secondo leggio di livello piu' alto")
+    # il docente ha scelto a mano il Flauto 2 come solista: niente scambi
+    pp = parti()
+    cfg_scelta = Configurazione(formazione={"flauto": 2}, livello="3a Media",
+                                strumenti_melodia=["flauto2"])
+    melodia_ai_primi_leggii(pp, cfg_scelta)
+    staffetta = {0: ["flauto2"]}
+    staffetta_ai_primi_leggii(staffetta, pp, cfg_scelta)
+    verifica({p.id: p.ruolo for p in pp}["flauto2"] == "melodia" and staffetta == {0: ["flauto2"]},
+             "ignorata la scelta del docente")
+
+    # una voce interna che raddoppia la melodia (la destra del pianoforte che
+    # suona il canto del solista) non e' un controcanto
+    from arranger.orchestratore import raddoppia_melodia
+    melodia = [Nota(midi=m, inizio=float(k), durata=1.0) for k, m in enumerate([64, 65, 67, 69])]
+    verifica(raddoppia_melodia([Nota(midi=m + 12, inizio=float(k), durata=1.0)
+                                for k, m in enumerate([64, 65, 67, 69])], melodia),
+             "raddoppio all'ottava non riconosciuto")
+    verifica(not raddoppia_melodia([Nota(midi=m, inizio=float(k), durata=1.0)
+                                    for k, m in enumerate([60, 62, 64, 65])], melodia),
+             "seconda voce scambiata per raddoppio")
+
+
+def test_richiesta_a_parole(inno):
+    """
+    Personalizzazione a parole: il modello traduce la richiesta del docente in
+    impostazioni del motore, mai in note. Si applica solo cio' che e' un
+    parametro con un valore ammesso; il resto va nel report. La risposta del
+    modello e' simulata: il test non chiama l'API.
+    """
+    import copy
+    from arranger import ia, richiesta
+    from arranger.lingua import valore_parametro
+    id_parti = {"flauto1": "Flauto 1", "violino1": "Violino 1", "violino2": "Violino 2"}
+
+    cfg = Configurazione(formazione={"flauto": 1, "violino": 2}, livello="2a Media")
+    note = richiesta.applica(cfg, {
+        "modifiche": {"stile": "Cinematico", "strumenti_melodia": ["violino1"],
+                      "staffetta_melodia": False, "trasporto": -2,
+                      "raddoppi_melodia": "no",          # non e' un booleano
+                      "livello": "3a Media",             # non si cambia da qui
+                      "silenzio_massimo_misure": 40,     # fuori dai limiti
+                      "misure_minime_solista": 8},       # gia' cosi': niente nota
+        "non_applicabili": ["aggiungere un'introduzione di quattro misure"],
+        "spiegazione": "Atmosfera da film con la melodia ai violini."}, id_parti)
+    verifica((cfg.stile, cfg.strumenti_melodia, cfg.staffetta_melodia, cfg.trasporto,
+              cfg.raddoppi_melodia, cfg.livello, cfg.silenzio_massimo_misure)
+             == ("Cinematico", ["violino1"], False, -2, True, "2a Media", 2),
+             f"impostazioni: {cfg}")
+    verifica(cfg.richiesta_applicata == {"stile": "Cinematico", "strumenti_melodia": ["violino1"],
+                                         "staffetta_melodia": False, "trasporto": -2},
+             f"richiesta_applicata: {cfg.richiesta_applicata}")
+    attese = ["[Richiesta] Atmosfera da film con la melodia ai violini.",
+              "[Richiesta] stile: Cinematico.",
+              "[Richiesta] strumenti della melodia: Violino 1.",
+              "[Richiesta] staffetta della melodia: no.",
+              "[Richiesta] trasporto (semitoni): -2.",
+              "[Richiesta] raddoppi della melodia: valore «no» non ammesso, lasciato com'era.",
+              "[Richiesta] «livello» non e' un'impostazione del motore: ignorata.",
+              "[Richiesta] pausa massima (misure): valore «40» non ammesso, lasciato com'era.",
+              "[Richiesta] Non applicato: aggiungere un'introduzione di quattro misure"]
+    verifica(note == attese, f"report della richiesta: {note}")
+    # parti inesistenti, risposte malformate
+    cfg = Configurazione(formazione={"flauto": 1})
+    note = richiesta.applica(cfg, {"modifiche": {"strumenti_melodia": ["tromba1"]}}, id_parti)
+    verifica(cfg.strumenti_melodia == [] and len(note) == 1, f"parte inesistente: {note}")
+    cfg = Configurazione(formazione={"flauto": 1})
+    note = richiesta.applica(cfg, {"modifiche": "Cinematico"}, id_parti)
+    verifica(cfg.richiesta_applicata == {} and note[0].startswith("[Richiesta] Nessuna"),
+             f"risposta malformata: {note}")
+    verifica(valore_parametro("trasporto", 1) == "+1" and valore_parametro("trasporto", 1, "en") == "+1",
+             "un trasporto di 1 letto come «si'»")
+
+    # nella pipeline: la richiesta cambia le impostazioni prima dell'arrangiamento
+    chiamate = []
+
+    def finto(cfg, id_parti, titolo=""):
+        chiamate.append(titolo)
+        return {"modifiche": {"stile": "Cinematico", "strumenti_melodia": ["violino1"],
+                              "staffetta_melodia": False},
+                "non_applicabili": [], "spiegazione": "Melodia ai violini."}
+
+    originali = (ia.interpreta_richiesta, ia.disponibile)
+    ia.interpreta_richiesta, ia.disponibile = finto, (lambda: True)
+    try:
+        cfg = Configurazione(formazione={"flauto": 1, "violino": 2, "violoncello": 1},
+                             livello="2a Media", usa_ia=True, ia_melodia=False,
+                             ia_stile=False, richiesta="atmosfera da film, melodia ai violini")
+        salvata = copy.deepcopy(cfg)
+        r = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"), nome_base="richiesta")
+        verifica(len(chiamate) == 1 and cfg.stile == "Cinematico"
+                 and r.partitura.stile == "Cinematico",
+                 f"richiesta non applicata: {chiamate}, stile {cfg.stile}")
+        canta = [p.nome for p in r.partitura.parti if p.ruolo == "melodia"]
+        verifica(canta == ["Violino 1"], f"melodia: {canta}")
+        verifica(any(x.startswith("[Richiesta] stile") for x in r.note_ia), f"note: {r.note_ia}")
+        # le impostazioni salvate dopo l'esecuzione si rigenerano senza modello
+        rifatta = Configurazione(**{k: getattr(cfg, k) for k in vars(salvata)})
+        esegui(inno, rifatta, cartella=os.path.join(QUI, "_out"), nome_base="richiesta2")
+        verifica(len(chiamate) == 1, "il modello e' stato richiamato rigenerando")
+        # modello che non risponde (es. credito esaurito): il motivo nel report
+        ia.interpreta_richiesta = lambda *a, **k: None
+        ia.ULTIMO_ERRORE = "Your credit balance is too low"
+        cfg = Configurazione(formazione={"flauto": 1}, usa_ia=True, ia_melodia=False,
+                             ia_stile=False, richiesta="melodia al flauto")
+        r = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"), nome_base="richiesta4")
+        verifica(any("credit balance" in x for x in r.note_ia), f"errore non riportato: {r.note_ia}")
+        verifica(cfg.strumenti_melodia == ["flauto1"],
+                 f"senza risposta del modello la richiesta non e' stata letta a regole: {cfg}")
+    finally:
+        ia.interpreta_richiesta, ia.disponibile = originali
+        ia.ULTIMO_ERRORE = None
+
+    # senza IA la legge l'interprete a regole
+    cfg = Configurazione(formazione={"flauto": 1, "violino": 2}, livello="2a Media",
+                         richiesta="atmosfera da film, melodia sempre ai violini")
+    r = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"), nome_base="richiesta3")
+    canta = [p.nome for p in r.partitura.parti if p.ruolo == "melodia"]
+    verifica(cfg.stile == "Cinematico" and canta == ["Violino 1"]
+             and any("senza IA" in x for x in r.note_ia),
+             f"senza IA: stile {cfg.stile}, melodia {canta}, note {r.note_ia}")
+
+
+def test_interprete_a_regole():
+    """
+    L'interprete senza IA: frasi comuni in italiano e in inglese diventano
+    impostazioni; cio' che non capisce, o che non si cambia da qui (livello,
+    organico, strumenti assenti), va fra i non applicabili con il motivo.
+    """
+    from arranger.interprete import interpreta
+    ids = {"flauto1": "Flauto 1", "flauto2": "Flauto 2", "violino1": "Violino 1",
+           "violino2": "Violino 2", "pianoforte1": "Pianoforte 1"}
+    casi = [
+        ("Vorrei un'atmosfera da colonna sonora, la melodia sempre ai violini senza "
+         "passarla agli altri, un tono sotto, e un'introduzione di 4 misure solo "
+         "pianoforte. Mettilo in prima media.",
+         {"stile": "Cinematico", "strumenti_melodia": ["violino1"],
+          "staffetta_melodia": False, "trasporto": -2}, 2),
+        ("niente jazz; melodia a tutti i flauti, cambia solista ogni frase; senza "
+         "raddoppi; lascia pure pause lunghe",
+         {"strumenti_melodia": ["flauto1", "flauto2"], "cambio_solista": "frase",
+          "raddoppi_melodia": False, "riempi_silenzi": False}, 0),
+        ("Film-music mood, melody always on the violins, no relay, a tone lower.",
+         {"stile": "Cinematico", "strumenti_melodia": ["violino1"],
+          "staffetta_melodia": False, "trasporto": -2}, 0),
+        ("melodia alla tromba, mezzo tono sopra, nessuno fermo a lungo",
+         {"trasporto": 1, "riempi_silenzi": True}, 1),
+        ("pause al massimo di 3 misure, staffetta ogni 8 misure, aggiungi una tromba",
+         {"riempi_silenzi": True, "silenzio_massimo_misure": 3,
+          "staffetta_melodia": True, "misure_minime_solista": 8}, 1),
+        ("in stile jazz, una quinta sopra, tonalita' originale per il ritornello",
+         {"stile": "Jazz", "trasporto": 0}, 0),
+        ("suona piano e dolce", {}, 1),       # «piano» dinamica: non e' il pianoforte
+    ]
+    for frase, attese, non_app in casi:
+        r = interpreta(frase, ids)
+        verifica(r["modifiche"] == attese and len(r["non_applicabili"]) == non_app,
+                 f"«{frase}»: {r}")
+
+
 def test_ia_degrada(inno):
     """Senza chiave API il motore deve funzionare identico, IA o no."""
     base = Configurazione(formazione={"flauto": 1, "violoncello": 1},
@@ -1560,6 +1988,337 @@ def test_corno(inno):
                      f"{primo.findtext('key/fifths')} invece di 1 (Do -> Sol)")
 
 
+def test_archi_prima_posizione(inno):
+    """
+    Violino e violoncello in 1a Media usano tutta la prima posizione (fino al
+    Si5 e al Re4), non solo le corde a vuoto. Le note fuori dalle prime due
+    applicazioni si segnalano nel report ma NON si cambiano.
+    Fonti: guida Alfred e programma di una collega (docs/principi_arrangiamento.md).
+    """
+    from arranger.modello import Evento, Parte, Partitura
+    from arranger.vincoli import avviso_note_scomode
+    verifica(strumento("violino").ambito("1a Media") == (55, 83),
+             f"violino 1a Media: {strumento('violino').ambito('1a Media')}")
+    verifica(strumento("violoncello").ambito("1a Media") == (36, 62),
+             f"violoncello 1a Media: {strumento('violoncello').ambito('1a Media')}")
+    # docente di violoncello: in 3a Media fino al Sol con tre tagli (Sol4)
+    verifica(strumento("violoncello").ambito("3a Media") == (36, 67),
+             f"violoncello 3a Media: {strumento('violoncello').ambito('3a Media')}")
+    # nessuno strumento ha un livello piu' alto con un ambito piu' stretto
+    for chiave, st in REGISTRO.items():
+        a1, a2, a3 = (st.ambito(l) for l in ("1a Media", "2a Media", "3a Media"))
+        verifica(a1[0] >= a2[0] >= a3[0] and a1[1] <= a2[1] <= a3[1],
+                 f"{chiave}: ambiti non crescenti {a1} {a2} {a3}")
+        for liv, note in st.note_scomode.items():
+            lo, hi = st.ambito(liv)
+            verifica(all(lo <= n <= hi for n in note),
+                     f"{chiave} {liv}: nota scomoda fuori estensione")
+
+    def partitura(livello_part, livello_parte=None, lingua="it", armature=(0, 0)):
+        misure = [Misura(numero=1, inizio=0.0, durata=4.0, tonalita=armature[0]),
+                  Misura(numero=2, inizio=4.0, durata=4.0, tonalita=armature[1])]
+        eventi = [Evento(0.0, 1.0, [61]),               # Do#4: scomoda
+                  Evento(1.0, 1.0, [62]),               # Re4: comoda
+                  Evento(2.0, 2.0, []),                 # pausa
+                  Evento(4.0, 4.0, [77], letterale=True)]   # Fa5 dell'originale
+        vl = Parte(id="violino1", nome="Violino 1", abbrev="Vl. 1",
+                   strumento="violino", eventi=eventi, ruolo="melodia")
+        vl.livello = livello_parte
+        return Partitura(parti=[vl], misure=misure, livello=livello_part,
+                         lingua=lingua)
+
+    part = partitura("1a Media")
+    avviso_note_scomode(part)
+    verifica(len(part.report) == 1 and part.report[0].startswith("[Diteggiatura] Violino 1: note scomode")
+             and "2 in tutto" in part.report[0] and part.report[0].endswith("mis. 1, 2") and "Do#4" in part.report[0]
+             and "Fa5" in part.report[0], f"avviso note scomode: {part.report}")
+    verifica([e.altezze for e in part.parti[0].eventi] == [[61], [62], [], [77]],
+             "l'avviso ha cambiato delle note")
+    # i nomi seguono l'armatura della misura: bemolli solo dove ce ne sono
+    from arranger.lingua import nota
+    verifica(nota(70, "it", bemolli=True) == "Sib4" and nota(70, "en", bemolli=True) == "Bb4"
+             and nota(70) == "La#4", "nomi delle note col bemolle errati")
+    part = partitura("1a Media", armature=(-2, 0))
+    avviso_note_scomode(part)
+    verifica("(Reb4, Fa5)" in part.report[0], f"armatura con bemolli: {part.report}")
+    part = partitura("1a Media", armature=(2, -1), lingua="en")
+    avviso_note_scomode(part)
+    verifica("(C#4, F5)" in part.report[0], f"armatura con diesis: {part.report}")
+    part = partitura("2a Media")
+    avviso_note_scomode(part)
+    verifica(not part.report, f"avviso in 2a Media: {part.report}")
+    part = partitura("3a Media", livello_parte="1a Media", lingua="en")
+    avviso_note_scomode(part)
+    verifica(len(part.report) == 1 and part.report[0].startswith("[Fingering] ")
+             and "Grade 1" in part.report[0],
+             f"livello del leggio non rispettato: {part.report}")
+
+    # sul brano intero: archi nell'estensione nuova, musica identica con e
+    # senza l'avviso (e' solo report)
+    cfg = Configurazione(formazione={"flauto": 2, "violino": 2,
+                                     "violoncello": 1, "pianoforte": 1},
+                         livello="1a Media", stile="Normale")
+    r = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"),
+               nome_base="archi_prima")
+    for p in r.partitura.parti:
+        if p.strumento not in ("violino", "violoncello"):
+            continue
+        lo, hi = strumento(p.strumento).ambito("1a Media")
+        fuori = [a for e in p.eventi for a in e.altezze if not lo <= a <= hi]
+        verifica(not fuori, f"{p.nome} fuori estensione: {fuori[:4]}")
+
+
+def test_buchi_armonia():
+    """
+    Avviso sui vuoti nella disposizione dell'orchestra intera (Rimskij-
+    Korsakov, cap. III): basso troppo lontano dalla voce sopra, o vuoto di
+    oltre un'ottava fra le voci superiori. Solo report: le note non cambiano.
+    """
+    from arranger.modello import Evento, Parte, Partitura
+    from arranger.vincoli import avviso_buchi_armonia
+
+    def partitura(voci, lingua="it", dinamica=None):
+        misure = [Misura(numero=1, inizio=0.0, durata=4.0),
+                  Misura(numero=2, inizio=4.0, durata=4.0)]
+        parti = []
+        for k, (strum, eventi) in enumerate(voci):
+            ev = [Evento(a, d, list(alt), dinamica=dinamica if j == 0 else None)
+                  for j, (a, d, alt) in enumerate(eventi)]
+            parti.append(Parte(id=f"p{k}", nome=f"Parte {k}", abbrev=f"P{k}",
+                               strumento=strum, eventi=ev))
+        return Partitura(parti=parti, misure=misure, lingua=lingua)
+
+    # basso Re2 sotto un flauto La5 per tutta la misura 1
+    part = partitura([("violoncello", [(0.0, 4.0, [38])]),
+                      ("flauto", [(0.0, 4.0, [81])])])
+    avviso_buchi_armonia(part)
+    verifica(len(part.report) == 1 and part.report[0].startswith("[Armonia] Basso")
+             and "Re2" in part.report[0] and "La5" in part.report[0]
+             and "Misure segnalate: 1 (1)." in part.report[0],
+             f"buco sopra il basso: {part.report}")
+    verifica([e.altezze for p in part.parti for e in p.eventi] == [[38], [81]],
+             "l'avviso ha cambiato delle note")
+    # accordo stretto in basso e melodia due ottave sopra: vuoto al centro
+    part = partitura([("pianoforte", [(0.0, 8.0, [48, 52, 55])]),
+                      ("flauto", [(0.0, 8.0, [79])])], lingua="en")
+    avviso_buchi_armonia(part)
+    verifica(len(part.report) == 1 and part.report[0].startswith("[Harmony] Gap")
+             and "Bars flagged: 2 (1, 2)." in part.report[0] and "G3" in part.report[0]
+             and "G5" in part.report[0], f"vuoto al centro: {part.report}")
+    # basso raddoppiato all'ottava (Sol1/Sol2) e glockenspiel isolato in
+    # acuto: nessuno dei due e' un buco
+    part = partitura([("pianoforte", [(0.0, 4.0, [31, 43])]),
+                      ("violoncello", [(0.0, 4.0, [43])]),
+                      ("violino", [(0.0, 4.0, [62, 67])]),
+                      ("glockenspiel", [(0.0, 4.0, [91])])])
+    avviso_buchi_armonia(part)
+    verifica(not part.report, f"basso all'ottava o glockenspiel segnalati: {part.report}")
+    # nel piano il vuoto e' tollerato
+    part = partitura([("violoncello", [(0.0, 4.0, [38])]),
+                      ("flauto", [(0.0, 4.0, [81])])], dinamica="p")
+    avviso_buchi_armonia(part)
+    verifica(not part.report, f"avviso nel piano: {part.report}")
+    # un solo battito su quattro (nota di passaggio): niente avviso
+    part = partitura([("violoncello", [(0.0, 4.0, [50])]),
+                      ("flauto", [(0.0, 1.0, [74]), (1.0, 3.0, [62])])])
+    avviso_buchi_armonia(part)
+    verifica(not part.report, f"avviso per un solo battito: {part.report}")
+    # disposizione piena: nessun avviso
+    part = partitura([("violoncello", [(0.0, 8.0, [43])]),
+                      ("clarinetto", [(0.0, 8.0, [55])]),
+                      ("violino", [(0.0, 8.0, [64])]),
+                      ("flauto", [(0.0, 8.0, [72])])])
+    avviso_buchi_armonia(part)
+    verifica(not part.report, f"avviso su un accordo ben disposto: {part.report}")
+
+
+def test_correzione_buchi_armonia():
+    """
+    Correzione dei buchi: una voce d'accompagnamento sopra il vuoto scende di
+    un'ottava, per tutto il blocco di misure. Mai la melodia, i suoi
+    raddoppi, il materiale letterale; mai fuori estensione, mai sotto il
+    basso, mai un leggio secondario sopra il primo.
+    """
+    from arranger.modello import Evento, Parte, Partitura
+    from arranger.vincoli import (_parti_armonia, _prova_spostamento,
+                                  avviso_buchi_armonia, correggi_buchi_armonia)
+
+    def parte(strum, nome, ruolo, eventi, letterale=False):
+        return Parte(id=nome, nome=nome, abbrev=nome, strumento=strum, ruolo=ruolo,
+                     eventi=[Evento(a, d, list(x), letterale=letterale)
+                             for a, d, x in eventi])
+
+    def partitura(*parti):
+        misure = [Misura(numero=k + 1, inizio=4.0 * k, durata=4.0) for k in range(3)]
+        return Partitura(parti=list(parti), misure=misure)
+
+    def altezze(part, nome):
+        return [e.altezze for p in part.parti if p.nome == nome for e in p.eventi]
+
+    melodia = [Nota(midi=79, inizio=0.0, durata=4.0),
+               Nota(midi=77, inizio=4.0, durata=4.0),
+               Nota(midi=76, inizio=8.0, durata=4.0)]
+    canto = [(0.0, 4.0, [79]), (4.0, 4.0, [77]), (8.0, 4.0, [76])]
+    basso = [(0.0, 4.0, [43]), (4.0, 4.0, [43]), (8.0, 4.0, [48])]
+    # misure 1-2: Sol2 al basso, poi niente fino al Sol4 (buco sopra il basso);
+    # misura 3 gia' ben disposta
+    part = partitura(
+        parte("flauto", "Flauto 1", "melodia", canto),
+        parte("flauto", "Flauto 2", "armonia", [(0.0, 4.0, [74]), (4.0, 4.0, [74]), (8.0, 4.0, [64])]),
+        parte("violino", "Violino 1", "armonia", [(0.0, 8.0, [67]), (8.0, 4.0, [60])]),
+        parte("violoncello", "Violoncello", "basso", basso))
+    correggi_buchi_armonia(part, melodia)
+    verifica(altezze(part, "Flauto 2") == [[62], [62], [64]],
+             f"Flauto 2 non abbassato sul blocco: {altezze(part, 'Flauto 2')}")
+    verifica(altezze(part, "Flauto 1") == [[79], [77], [76]]
+             and altezze(part, "Violoncello") == [[43], [43], [48]],
+             "melodia o basso toccati")
+    verifica(part.report == ["[Armonia] Flauto 2, mis. 1-2: accompagnamento "
+                             "abbassato di un'ottava per riempire il vuoto nel "
+                             "registro medio."], f"report: {part.report}")
+    avviso_buchi_armonia(part)
+    verifica(len(part.report) == 1, f"restano buchi: {part.report[1:]}")
+
+    # i divieti, uno per uno, sulla funzione che decide se si puo' spostare
+    def prova(candidata, *altre):
+        part = partitura(parte("flauto", "Flauto 1", "melodia", canto),
+                         candidata, *altre,
+                         parte("violoncello", "Violoncello", "basso", basso))
+        return _prova_spostamento(part, _parti_armonia(part), candidata,
+                                  0.0, 8.0, melodia)
+
+    d5 = [(0.0, 4.0, [74]), (4.0, 4.0, [74])]
+    verifica(prova(parte("flauto", "Flauto 2", "armonia", d5)) is not None,
+             "accompagnamento normale non spostabile")
+    verifica(prova(parte("flauto", "Flauto 2", "melodia", d5)) is None,
+             "spostata una parte di melodia")
+    verifica(prova(parte("flauto", "Flauto 2", "armonia",
+                         [(0.0, 4.0, [67]), (4.0, 4.0, [65])])) is None,
+             "spostato un raddoppio della melodia")
+    verifica(prova(parte("flauto", "Flauto 2", "armonia", d5, letterale=True)) is None,
+             "spostato materiale letterale")
+    verifica(prova(parte("violino", "Violino 1", "armonia",
+                         [(0.0, 8.0, [66])])) is None,
+             "spostamento fuori estensione (Fa#4 -> Fa#3)")
+    verifica(prova(parte("violino", "Violino 1", "armonia", [(0.0, 8.0, [74])]),
+                   parte("violino", "Violino 2", "armonia", [(0.0, 8.0, [67])])) is None,
+             "Violino 1 abbassato sotto il Violino 2")
+    verifica(prova(parte("flauto", "Flauto 2", "armonia", d5 + [(8.0, 4.0, [72])])) is None,
+             "salto d'uscita oltre il limite del livello (Re4 -> Do5 in 1a Media)")
+    verifica(prova(parte("clarinetto", "Clarinetto", "armonia",
+                         [(0.0, 8.0, [52])])) is None,
+             "la voce spostata diventa il basso")
+
+def test_buchi_riempiti_dalla_sinistra():
+    """
+    Dove il basso resta staccato e nessuno strumento puo' scendere, la
+    sinistra del pianoforte aggiunge una nota dell'accordo sopra il basso,
+    entro l'apertura della mano del livello. Mai la settima, mai il raddoppio
+    del basso, mai sopra la destra; niente se la sinistra porta la melodia o
+    copia l'originale.
+    """
+    from arranger.modello import Accordo, Evento, Parte, Partitura
+    from arranger.vincoli import _nota_per_la_sinistra, correggi_buchi_armonia
+
+    # Do maggiore in primo rivolto, basso Mi2 (40): fondamentale o quinta, la
+    # piu' alta entro 9 semitoni -> Do3 (48); mai il Mi (basso)
+    do6 = Accordo(inizio=0.0, durata=4.0, fondamentale=0, qualita="maj", basso=4)
+    verifica(_nota_per_la_sinistra(do6, 40, 9, 64) == 48,
+             f"nota per la sinistra: {_nota_per_la_sinistra(do6, 40, 9, 64)}")
+    # Sol7, basso Sol2 (43), apertura 12: Re3 (50) o Sol? il Sol e' il basso,
+    # il Fa (settima) mai -> Re3
+    sol7 = Accordo(inizio=0.0, durata=4.0, fondamentale=7, qualita="dom7")
+    verifica(_nota_per_la_sinistra(sol7, 43, 12, 64) == 50,
+             f"settima o basso raddoppiati: {_nota_per_la_sinistra(sol7, 43, 12, 64)}")
+    # il tetto (la destra) comanda
+    verifica(_nota_per_la_sinistra(do6, 40, 9, 46) == 43,
+             f"sopra la destra: {_nota_per_la_sinistra(do6, 40, 9, 46)}")
+
+    def partitura(letterale=False, ruolo="armonia"):
+        misure = [Misura(numero=k + 1, inizio=4.0 * k, durata=4.0) for k in range(2)]
+        canto = [Evento(0.0, 4.0, [67]), Evento(4.0, 4.0, [67])]
+        pf = Parte(id="pianoforte1", nome="Pianoforte", abbrev="Pf.",
+                   strumento="pianoforte", ruolo=ruolo, righi=2,
+                   eventi=[Evento(0.0, 4.0, [40], rigo=2, letterale=letterale),
+                           Evento(4.0, 4.0, [40], rigo=2, letterale=letterale),
+                           Evento(0.0, 4.0, [60, 64], rigo=1),
+                           Evento(4.0, 4.0, [60, 64], rigo=1)])
+        fl = Parte(id="flauto1", nome="Flauto", abbrev="Fl.", strumento="flauto",
+                   ruolo="melodia", eventi=canto)
+        return Partitura(parti=[fl, pf], misure=misure,
+                         armonia=[Accordo(inizio=0.0, durata=8.0, fondamentale=0,
+                                          qualita="maj", basso=4)])
+
+    melodia = [Nota(midi=67, inizio=0.0, durata=8.0)]
+    part = partitura()
+    correggi_buchi_armonia(part, melodia)
+    sinistra = [e.altezze for e in part.parti[1].eventi if e.rigo == 2]
+    verifica(sinistra == [[40, 48], [40, 48]], f"sinistra: {sinistra}")
+    verifica(part.report == ["[Armonia] Pianoforte, mis. 1-2: la sinistra "
+                             "aggiunge una nota dell'accordo sopra il basso per "
+                             "riempire il registro medio."], f"report: {part.report}")
+    for caso in (partitura(letterale=True), partitura(ruolo="melodia")):
+        correggi_buchi_armonia(caso, melodia)
+        sinistra = [e.altezze for e in caso.parti[1].eventi if e.rigo == 2]
+        verifica(sinistra == [[40], [40]] and not caso.report,
+                 f"sinistra letterale o di melodia toccata: {caso.report}")
+
+
+def test_equilibrio_sonorita():
+    """
+    Pesi di sonorita' (Rimskij-Korsakov: 1 tromba = 2 corni = 4 legni): una
+    tromba che accompagna copre un flauto che canta e va diradata e messa in
+    piano, con la dinamica di prima ripristinata dopo il tratto. Un raddoppio
+    della melodia la rende piu' forte; un accompagnamento leggero non si
+    tocca; troppe parti insieme si diradano a partire dalla piu' pesante.
+    """
+    from types import SimpleNamespace
+    from arranger.modello import Evento, Parte, Partitura
+    from arranger.orchestratore import equilibra_sonorita
+
+    misure = [Misura(numero=k + 1, inizio=4.0 * k, durata=4.0) for k in range(3)]
+    analisi = SimpleNamespace(melodia=[Nota(midi=72 + k % 3, inizio=float(k), durata=1.0)
+                                       for k in range(8)])
+
+    def canto(nome="Flauto 1", strum="flauto"):
+        return Parte(id=nome, nome=nome, abbrev=nome, strumento=strum, ruolo="melodia",
+                     eventi=[Evento(float(k), 1.0, [72 + k % 3]) for k in range(8)])
+
+    def accomp(nome, strum, dinamica="mf"):
+        ev = [Evento(0.0, 4.0, [60, 64, 67], dinamica=dinamica),
+              Evento(4.0, 4.0, [60, 64, 67]), Evento(8.0, 4.0, [60, 64, 67])]
+        return Parte(id=nome, nome=nome, abbrev=nome, strumento=strum,
+                     ruolo="armonia", eventi=ev)
+
+    part = Partitura(parti=[canto(), accomp("Tromba", "tromba", "f")], misure=misure)
+    rep = equilibra_sonorita(part, analisi)
+    tromba = part.parti[1].eventi
+    verifica(rep == ["[Equilibrio] Tromba: copriva la melodia, diradato e in "
+                     "piano nelle misure 1-2."], f"report: {rep}")
+    verifica(tromba[0].dinamica == "p" and len(tromba[0].altezze) == 2
+             and tromba[2].dinamica == "f",
+             f"tromba: {[(e.dinamica, e.altezze) for e in tromba]}")
+    verifica([e.altezze for e in part.parti[0].eventi]
+             == [[72 + k % 3] for k in range(8)], "la melodia e' stata toccata")
+
+    # flauto raddoppiato dal violino (peso 2): la tromba non copre piu'
+    part = Partitura(parti=[canto(), canto("Violino 1", "violino"),
+                            accomp("Tromba", "tromba")], misure=misure)
+    verifica(not equilibra_sonorita(part, analisi), "raddoppio non considerato")
+    # accompagnamento leggero: niente
+    part = Partitura(parti=[canto(), accomp("Violino 2", "violino"),
+                            accomp("Clarinetto", "clarinetto")], misure=misure)
+    verifica(not equilibra_sonorita(part, analisi), "accompagnamento leggero diradato")
+    # troppe parti: pianoforte (2) + quattro da 1 = 6 > 5 -> solo il pianoforte
+    part = Partitura(parti=[canto(), accomp("Pianoforte", "pianoforte"),
+                            accomp("Violino 2", "violino"), accomp("Clarinetto", "clarinetto"),
+                            accomp("Violoncello", "violoncello"), accomp("Flauto 2", "flauto")],
+                     misure=misure)
+    rep = equilibra_sonorita(part, analisi)
+    verifica(len(rep) == 1 and rep[0].startswith("[Equilibrio] Pianoforte"),
+             f"accompagnamento troppo pieno: {rep}")
+
+
 def test_divisi_piu_facili(inno, canzone):
     """
     I leggii successivi al primo non suonano mai sopra il primo e hanno valori
@@ -2011,6 +2770,110 @@ def test_basso_rispetta_i_rivolti():
              "sotto C/E il basso deve suonare Mi, non Do")
     verifica(len(a.basso) == 2 and a.basso[1].midi % 12 == 7,
              "sotto G il basso deve suonare Sol")
+
+
+def test_sigla_tenuta_smentita_dal_pianoforte():
+    """
+    Feedback su Les Miserables, misura 12: la sigla D7/F# a meta' della 11,
+    nessuna sigla sul primo tempo della 12, dove il pianoforte suona Mib
+    maggiore. La sigla tenuta faceva suonare Re-Fa#-La a meta' orchestra
+    contro il Mib del pianoforte. Il prolungamento di una sigla e' una
+    deduzione: dove l'accompagnamento scritto la smentisce, comanda cio' che
+    suona. Il basso tenuto (Mib) va poi spezzato sul Sib/Do del terzo tempo.
+    """
+    def accordo(*note, quarti=2):
+        return [_n(p, o, quarti, alter=a, accordo=i > 0)
+                for i, (p, o, a) in enumerate(note)]
+
+    sib_do = ("      <harmony><root><root-step>B</root-step><root-alter>-1"
+              "</root-alter></root><kind>major</kind><bass><bass-step>C"
+              "</bass-step></bass></harmony>")
+    re7 = ("      <harmony><root><root-step>D</root-step></root><kind>dominant"
+           "</kind><bass><bass-step>F</bass-step><bass-alter>1</bass-alter>"
+           "</bass></harmony>")
+
+    def spartito(primo_tempo_m2):
+        voce = [[re7, _n("D", 5, 4)],
+                [_n("B", 4, 2, alter=-1), sib_do, _n("D", 5, 2)],
+                [_h("F"), _n("C", 5, 4)]]
+        pf = [accordo(("F", 3, 1), ("A", 3, 0), ("C", 4, 0), ("D", 4, 0),
+                      quarti=4),
+              primo_tempo_m2 + accordo(("C", 3, 0), ("E", 3, 0), ("G", 3, 0),
+                                       ("B", 3, -1)),
+              accordo(("F", 3, 0), ("A", 3, 0), ("C", 4, 0), quarti=4)]
+        return ingestione.ingerisci(_scrivi_xml(
+            "sigla_tenuta.xml", [("Voce", voce), ("Pianoforte", pf)]))
+
+    sp = spartito(accordo(("E", 3, -1), ("G", 3, 0), ("B", 3, -1)))
+    a = analizzatore.analizza(sp)
+    primo = next(x for x in a.armonia if x.inizio <= 4.0 + 1e-6 < x.fine)
+    verifica(primo.fondamentale == 3 and primo.qualita == "maj",
+             "dove il pianoforte suona Mib la sigla D7/F# tenuta non vale: "
+             f"{primo.sigla()}")
+    terzo = next(x for x in a.armonia if x.inizio <= 6.0 + 1e-6 < x.fine)
+    verifica(terzo.fondamentale == 10 and terzo.basso == 0,
+             f"la sigla scritta Sib/Do resta: {terzo.sigla()}")
+    sotto = [n for n in a.basso if n.inizio < 8.0 - 1e-6 and n.fine > 6.0 + 1e-6]
+    verifica(sotto and all(n.midi % 12 == 0 for n in sotto),
+             "sotto Sib/Do il basso deve suonare Do, non il Mib tenuto: "
+             f"{[n.midi for n in sotto]}")
+
+    # dove il pianoforte conferma la sigla, il prolungamento resta
+    sp = spartito(accordo(("F", 3, 1), ("A", 3, 0), ("C", 4, 0), ("D", 4, 0)))
+    a = analizzatore.analizza(sp)
+    primo = next(x for x in a.armonia if x.inizio <= 4.0 + 1e-6 < x.fine)
+    verifica(primo.fondamentale == 2 and primo.qualita == "dom7",
+             f"la sigla confermata dal pianoforte va tenuta: {primo.sigla()}")
+
+
+def test_semitoni_contro_l_originale():
+    """
+    Les Miserables, misura 12, terzo tempo: sigla Sib/Do, pianoforte
+    Do-Mi-Sol-Sib. Il flauto 3 prendeva il Fa della sigla, un semitono sopra
+    il Mi del pianoforte. Una nota scritta dall'arrangiatore non deve stridere
+    di semitono con cio' che l'originale suona; restano intatte la melodia,
+    il materiale letterale e le note che l'originale stesso suona.
+    """
+    from arranger.modello import Evento, Parte, Partitura
+    from arranger.vincoli import filtro_semitoni
+
+    misure = [Misura(numero=1, inizio=0.0, durata=4.0)]
+    originale = [Nota(midi=48, inizio=0.0, durata=4.0, rigo=2),     # Do3
+                 Nota(midi=64, inizio=0.0, durata=4.0),              # Mi4
+                 Nota(midi=70, inizio=0.0, durata=4.0),              # Sib4
+                 Nota(midi=73, inizio=0.0, durata=0.25)]             # Do#5 di passaggio
+
+    def parte(id_, ruolo, altezze, letterale=False):
+        return Parte(id=id_, nome=id_, abbrev=id_, strumento="flauto",
+                     ruolo=ruolo,
+                     eventi=[Evento(0.0, 4.0, altezze, letterale=letterale)])
+
+    fa = parte("fa", "controcanto", [65])            # Fa contro Mi: stride
+    si = parte("si", "armonia", [71])                # Si contro Sib e Do: stride
+    re = parte("re", "armonia", [74])                # Re: solo la nota breve
+    mel = parte("mel", "melodia", [65])
+    lett = parte("lett", "armonia", [65], letterale=True)
+    part = Partitura(parti=[fa, si, re, mel, lett], misure=misure)
+    filtro_semitoni(part, originale)
+
+    verifica(fa.eventi[0].altezze == [64],
+             f"il Fa contro il Mi dell'originale va sul Mi: {fa.eventi[0].altezze}")
+    verifica(si.eventi[0].altezze[0] % 12 in (10, 0),
+             f"il Si contro Sib e Do va su una nota dell'originale: "
+             f"{si.eventi[0].altezze}")
+    verifica(re.eventi[0].altezze == [74],
+             "una nota di passaggio dell'originale non sposta nulla")
+    verifica(mel.eventi[0].altezze == [65], "la melodia non si tocca")
+    verifica(lett.eventi[0].altezze == [65], "il materiale letterale non si tocca")
+    verifica(any("[Semitoni]" in r for r in part.report),
+             "lo spostamento va registrato nel report")
+
+    # nota che l'originale stesso suona: Do maj7 scritto e suonato
+    part = Partitura(parti=[parte("si7", "armonia", [71])], misure=misure)
+    filtro_semitoni(part, [Nota(midi=60, inizio=0.0, durata=4.0),
+                           Nota(midi=59, inizio=0.0, durata=4.0)])
+    verifica(part.parti[0].eventi[0].altezze == [71],
+             "il Si di un Do maj7 suonato anche dall'originale resta")
 
 
 def test_sigle_lette_da_qualunque_parte():
@@ -2577,6 +3440,138 @@ def test_feedback_allegati(inno):
     verifica(sorted(z.namelist()) == ["a.xml", "a_2.xml"], f"zip: {z.namelist()}")
 
 
+def test_server_web(inno):
+    """
+    server.py (nuova interfaccia web): accesso con link via email, lettura
+    dello spartito, arrangiamento, download riservato a chi l'ha fatto,
+    livelli per leggio, limite del piano Free, lista d'attesa, errori e
+    percorsi non ammessi.
+    """
+    import base64
+    import io
+    import json
+    import tempfile
+    from urllib.parse import parse_qs, urlparse
+    # database usa e getta e niente mail vere: il link torna nella risposta
+    os.environ["SCORECRAFT_DB"] = os.path.join(tempfile.mkdtemp(), "prova.db")
+    os.environ["SCORECRAFT_SENZA_MAIL"] = "1"
+    os.environ.pop("SCORECRAFT_URL", None)
+    sys.path.insert(0, os.path.dirname(QUI))
+    import account
+    import server
+
+    def chiama(metodo, percorso, dati=None, cookie="", query=""):
+        corpo = json.dumps(dati).encode() if dati is not None else b""
+        env = {"REQUEST_METHOD": metodo, "PATH_INFO": percorso, "QUERY_STRING": query,
+               "CONTENT_LENGTH": str(len(corpo)), "CONTENT_TYPE": "application/json",
+               "HTTP_HOST": "localhost:8600", "HTTP_COOKIE": cookie,
+               "wsgi.url_scheme": "http", "wsgi.input": io.BytesIO(corpo)}
+        stato = {}
+        uscita = b"".join(server.applicazione(
+            env, lambda s, h: stato.update(s=s, h=dict(h))))
+        return stato["s"], uscita, stato["h"]
+
+    def entra(email):
+        s, out, _ = chiama("POST", "/api/accesso", {"email": email, "lingua": "it"})
+        link = json.loads(out).get("link_locale", "")
+        token = parse_qs(urlparse(link).query).get("token", [""])[0]
+        s, _, h = chiama("GET", "/accedi", query=f"token={token}&lang=it")
+        biscotto = h.get("Set-Cookie", "").split(";")[0]
+        return s, biscotto, token
+
+    # --- senza accesso non si arrangia
+    s, out, _ = chiama("POST", "/api/arrangia", {"esempio": "pf", "formazione": {"flauto": 1}})
+    verifica(s.startswith("401") and json.loads(out)["errore"] == "accesso_richiesto",
+             f"server: senza accesso deve rispondere 401 ({s})")
+    s, out, _ = chiama("POST", "/api/accesso", {"email": "non-una-email"})
+    verifica(s.startswith("400"), f"server: email non valida accettata ({s})")
+
+    s, cookie, token = entra("Docente@Scuola.it")
+    verifica(s.startswith("302") and cookie.startswith(server.COOKIE + "="),
+             f"server: il link di accesso deve aprire la sessione ({s}, {cookie})")
+    s, _, h = chiama("GET", "/accedi", query=f"token={token}")
+    verifica("accesso=scaduto" in h.get("Location", ""), "server: un link di accesso vale una volta sola")
+    s, out, _ = chiama("POST", "/api/io", {}, cookie)
+    io_ = json.loads(out)
+    verifica(io_.get("email") == "docente@scuola.it" and io_.get("piano") == "free"
+             and io_.get("rimasti_mese") == 3, f"server: situazione dell'utente ({io_})")
+
+    with open(inno, "rb") as f:
+        contenuto = base64.b64encode(f.read()).decode()
+    s, out, _ = chiama("POST", "/api/spartito", {"nome_file": "inno.xml", "contenuto": contenuto}, cookie)
+    info = json.loads(out)
+    verifica(s.startswith("200") and info["tipo"] == "pianistico",
+             f"server: lettura dello spartito ({s}, {info})")
+
+    richiesta = {"esempio": "pf", "formazione": {"flauto": 2, "violino": 2, "pianoforte": 1},
+                 "livello": 0, "livelli_leggii": {"violino1": 2, "flauto1": 0, "flauto2": 0},
+                 "stile": "Normale", "lingua": "it"}
+    s, out, _ = chiama("POST", "/api/arrangia", richiesta, cookie)
+    r = json.loads(out)
+    verifica(s.startswith("200") and len(r["parti"]) == 5, f"server: arrangiamento ({s})")
+    verifica(r.get("account", {}).get("rimasti_mese") == 2,
+             f"server: il contatore del Free deve scendere ({r.get('account')})")
+    livelli = {p["id"]: p["livello"] for p in r["parti"]}
+    verifica(livelli.get("violino1") == 2 and livelli.get("flauto2") == 0,
+             f"server: livello per leggio non applicato ({livelli})")
+    cfg = server.configurazione(richiesta)
+    verifica(cfg.livelli_strumenti == {"violino1": "3a Media"},
+             f"server: si passano solo i leggii diversi dalla classe ({cfg.livelli_strumenti})")
+    verifica(cfg.riempi_silenzi and cfg.silenzio_massimo_misure == 2 and not cfg.usa_ia,
+             "server: opzioni fisse (riempi, pausa 2, niente IA)")
+
+    s, xml, _ = chiama("GET", r["file"]["xml"], cookie=cookie)
+    verifica(s.startswith("200") and xml.startswith(b"<?xml"), f"server: download MusicXML ({s})")
+    s, _, _ = chiama("GET", r["file"]["xml"])
+    verifica(s.startswith("404"), f"server: download senza accesso ({s})")
+    _, altro, _ = entra("collega@scuola.it")
+    s, _, _ = chiama("GET", r["file"]["xml"], cookie=altro)
+    verifica(s.startswith("404"), f"server: un altro utente non scarica il file ({s})")
+
+    s, out, _ = chiama("POST", "/api/arrangia", dict(richiesta, lingua="en"), cookie)
+    nomi_en = [p["nome"] for p in json.loads(out)["parti"]]
+    verifica("Flute 1" in nomi_en, f"server: parti in inglese ({nomi_en})")
+
+    # --- limite del piano Free: il terzo passa, il quarto no; il Docente non ha limite
+    s, _, _ = chiama("POST", "/api/arrangia", richiesta, cookie)
+    s, out, _ = chiama("POST", "/api/arrangia", richiesta, cookie)
+    verifica(s.startswith("403") and json.loads(out)["errore"] == "limite_free",
+             f"server: il quarto arrangiamento del mese va bloccato ({s})")
+    account.imposta_piano("docente@scuola.it", "docente")
+    s, _, _ = chiama("POST", "/api/arrangia", richiesta, cookie)
+    verifica(s.startswith("200"), f"server: il piano Docente non ha limite ({s})")
+
+    for dati, codice in (({**richiesta, "formazione": {}}, "formazione_vuota"),
+                         ({**richiesta, "formazione": {"arpa": 1}}, "strumento_sconosciuto"),
+                         ({"nome_file": "brano.pdf", "contenuto": contenuto}, "formato")):
+        percorso = "/api/spartito" if "nome_file" in dati else "/api/arrangia"
+        s, out, _ = chiama("POST", percorso, dati, cookie)
+        verifica(s.startswith("400") and json.loads(out)["errore"] == codice,
+                 f"server: errore atteso {codice}, ricevuto {s} {out[:80]}")
+
+    for percorso in ("/../server.py", "/api/file/" + "0" * 32 + "/x.musicxml",
+                     "/api/file/" + r["id"] + "/impostazioni.json",
+                     "/api/file/" + r["id"] + "/proprietario.txt"):
+        s, _, _ = chiama("GET", percorso, cookie=cookie)
+        verifica(s.startswith("404"), f"server: {percorso} non deve essere servito ({s})")
+
+    # --- lista d'attesa: serve il consenso, poi la conferma via link
+    s, out, _ = chiama("POST", "/api/lista-attesa", {"email": "a@b.it", "piano": "docente", "consenso": False})
+    verifica(s.startswith("400") and json.loads(out)["errore"] == "consenso_mancante",
+             f"server: lista d'attesa senza consenso ({s})")
+    s, out, _ = chiama("POST", "/api/lista-attesa", {"email": "a@b.it", "piano": "docente", "consenso": True})
+    link = json.loads(out).get("link_locale", "")
+    s, _, h = chiama("GET", "/conferma-lista", query=urlparse(link).query)
+    verifica("lista=confermata" in h.get("Location", ""), f"server: conferma della lista ({h})")
+
+    # --- uscita: la sessione non vale piu'
+    chiama("POST", "/api/esci", {}, cookie)
+    s, _, _ = chiama("POST", "/api/io", {}, cookie)
+    verifica(s.startswith("401"), f"server: dopo l'uscita la sessione deve scadere ({s})")
+    s, _, _ = chiama("GET", "/prezzi")
+    verifica(s.startswith("200"), f"server: pagina dei prezzi ({s})")
+
+
 def test_manifesto_file():
     """manifesto.json e' aggiornato, e un file vecchio o mancante viene
     riconosciuto per nome (il caso del repository aggiornato a meta')."""
@@ -2630,6 +3625,8 @@ if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
     test_basso_rispetta_i_rivolti()
+    test_sigla_tenuta_smentita_dal_pianoforte()
+    test_semitoni_contro_l_originale()
     test_sigle_lette_da_qualunque_parte()
     test_sigla_con_offset()
     test_nessun_accordo_non_diventa_una_triade()
@@ -2698,6 +3695,19 @@ if __name__ == "__main__":
     test_arpeggio_cinematico_sopra_la_sinistra()
     test_basso_sinistra_nel_registro(canzone)
     test_corno(inno)
+    test_archi_prima_posizione(inno)
+    test_buchi_armonia()
+    test_correzione_buchi_armonia()
+    test_buchi_riempiti_dalla_sinistra()
+    test_equilibrio_sonorita()
+    test_solista_debole_ripristina_dinamica()
+    test_staffetta_nota_in_comune(inno)
+    test_raddoppi_per_famiglia()
+    test_controcanti_a_voci_diverse(inno)
+    test_solista_traspositore()
+    test_melodia_al_primo_leggio()
+    test_richiesta_a_parole(inno)
+    test_interprete_a_regole()
     test_divisi_piu_facili(inno, canzone)
     test_mano_sinistra_non_sale(inno)
     test_livello_per_strumento_precedenza()
@@ -2714,6 +3724,7 @@ if __name__ == "__main__":
     test_cataloghi_completi()
     test_versione_inglese(inno)
     test_feedback_allegati(inno)
+    test_server_web(inno)
     test_manifesto_file()
 
     print(f"\n{OK} verifiche superate, {len(KO)} fallite")

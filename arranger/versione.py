@@ -10,17 +10,81 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple
 
-VERSIONE = "0.9.6"
-DATA = "ottobre 2026"
-DATA_EN = "October 2026"
-PRECEDENTE = "0.9.5"
+VERSIONE = "0.9.7"
+DATA = "novembre 2026"
+DATA_EN = "November 2026"
+PRECEDENTE = "0.9.6"
 
 # Marca temporale del pacchetto: serve a capire a colpo d'occhio QUALE copia
 # del progetto sta girando, quando ne esistono piu' d'una sul disco.
-COMPILATO = "26 ottobre 2026 ore 17.31"
+COMPILATO = "2 novembre 2026 ore 09.05"
 
 # (titolo della sezione, [voci])
 NOVITA: List[Tuple[str, List[str]]] = [
+    ("Archi: prima posizione intera", [
+        "Violino in 1a media da Sol3 a Si5, col 4o dito sul Mi (prima si "
+        "fermava al Mi a vuoto); in 2a media sale almeno fino al Si5. "
+        "Violoncello in 1a media fino al Re4, col 4o dito sul La; in 3a "
+        "media fino al Sol4 (prima Do5, troppo alto, confermato da un "
+        "docente di violoncello). Fonti: guida Alfred per gradi e programma "
+        "di violino di una collega, riassunte in "
+        "docs/principi_arrangiamento.md.",
+        "Nuovo avviso [Diteggiatura]: in 1a media segnala, senza cambiarle, "
+        "le note scomode (violino: 1o dito basso e 3o dito alto; "
+        "violoncello: note che chiedono l'estensione della mano), con le "
+        "misure da controllare. I nomi seguono l'armatura: Sib4 in Fa "
+        "maggiore, La#4 in Si maggiore.",
+    ]),
+    ("Personalizzazione a parole (nuovo)", [
+        "Nuovo campo «Personalizza l'arrangiamento»: si scrive come si vuole "
+        "il brano (stile, chi porta la melodia, staffetta, raddoppi, pause, "
+        "trasporto) e la richiesta diventa impostazioni del motore. Nessuna "
+        "nota viene scritta a mano e la melodia non cambia.",
+        "Senza IA la legge un interprete a regole, in italiano e in inglese: "
+        "riconosce le frasi piu' comuni, sempre allo stesso modo e senza "
+        "costi. Il report dice che cosa e' stato applicato e che cosa no, "
+        "con le parole del docente. Nelle impostazioni salvate la richiesta "
+        "e' gia' tradotta: rigenerando, l'arrangiamento e' lo stesso.",
+    ]),
+    ("Melodia: raddoppi, staffetta e primi leggii", [
+        "Il raddoppio della melodia sceglie lo strumento col miglior "
+        "impasto (legni con legni, archi con archi; i legni addolciscono "
+        "gli ottoni) e scarta chi coprirebbe il solista, come la tromba su "
+        "un flauto (Rimskij-Korsakov).",
+        "Staffetta agganciata: quando la melodia passa da uno strumento "
+        "all'altro senza respiro, chi la cede suona anche la prima nota di "
+        "chi la riceve. La melodia resta identica.",
+        "Fra i leggii dello stesso strumento la parte piu' esposta va "
+        "sempre al primo: se la melodia era finita al Flauto 2 e il "
+        "controcanto al Flauto 1, i ruoli si scambiano (avvisi [Ruoli] e "
+        "[Staffetta]).",
+        "I controcanti di piu' parti suonano voci diverse invece di "
+        "raddoppiarsi; glockenspiel e metallofono restano colore.",
+    ]),
+    ("Equilibrio e armonia piena", [
+        "Nuovo avviso [Equilibrio]: una parte d'accompagnamento che copre "
+        "la melodia (per peso di sonorita': 1 tromba = 2 corni = 4 legni) "
+        "viene diradata e portata in piano in quei punti; dopo torna la "
+        "dinamica di prima.",
+        "Buchi nell'armonia: dove fra le voci resta un vuoto di oltre "
+        "un'ottava, l'accompagnamento si abbassa d'ottava o la sinistra del "
+        "pianoforte aggiunge una nota dell'accordo sopra il basso. I vuoti "
+        "che restano sono segnalati nel report [Armonia].",
+        "Nuovo controllo [Semitoni]: le note inventate a un semitono da una "
+        "nota dell'originale vengono spostate su una nota che non stride.",
+    ]),
+    ("Strumenti traspositori e sigle", [
+        "Spartiti con strumenti traspositori (clarinetto, corno, sax, "
+        "tromba): note, sigle e armatura del file vengono riportate a suono "
+        "reale. Prima la melodia di un clarinetto in Sib arrivava un tono "
+        "sopra l'armonia del pianoforte.",
+        "Una sigla dedotta (che vale fino alla successiva) cede il passo "
+        "all'accordo che il pianoforte dell'originale suona davvero in "
+        "quella misura.",
+        "Un basso tenuto attraverso un cambio d'accordo, se e' estraneo al "
+        "nuovo accordo, si spezza li' invece di suonare sotto l'armonia "
+        "nuova.",
+    ]),
     ("Nuovo nome: ScoreCraft Edu", [
         "Arranger SMIM diventa ScoreCraft Edu. Cambiano il titolo "
         "dell'app, la firma nel MusicXML e nel sorgente LilyPond e "
@@ -398,6 +462,54 @@ def riepilogo() -> Dict[str, int]:
 # Per l'interfaccia inglese: solo le novita' rilevanti per chi la usa da
 # fuori Italia. Lo storico completo resta in italiano qui sopra.
 NOVITA_EN: List[Tuple[str, List[str]]] = [
+    ("Strings: full first position", [
+        "Violin at Grade 1 from G3 to B5, with the 4th finger on the E "
+        "string (it used to stop at open E); Grade 2 reaches at least B5. "
+        "Cello at Grade 1 up to D4, with the 4th finger on the A string; at "
+        "Grade 3 up to G4 (it used to be C5, too high).",
+        "New [Fingering] warning: at Grade 1 it flags awkward notes without "
+        "changing them (violin: low 1st and high 3rd finger; cello: notes "
+        "that need an extension), with the bars to check. Note names follow "
+        "the key signature: Bb4 in F major, A#4 in B major.",
+    ]),
+    ("Personalise in words (new)", [
+        "New «Personalise the arrangement» field: describe the style, who "
+        "carries the melody, relay, doublings, rests, transposition, and the "
+        "request becomes engine settings. No notes are written by hand and "
+        "the melody never changes.",
+        "Without AI a rule-based reader handles the most common phrases, in "
+        "English and Italian, always the same way and at no cost. The report "
+        "says what was applied and what was not.",
+    ]),
+    ("Melody: doublings, relay and first desks", [
+        "The melody is doubled by the instrument with the best blend "
+        "(woodwinds with woodwinds, strings with strings) and never by one "
+        "that would cover the soloist, such as a trumpet on a flute.",
+        "Linked relay: when the melody passes to another instrument without "
+        "a breath, the outgoing player also plays the first note of the "
+        "incoming one. The melody is unchanged.",
+        "Within the same instrument the most exposed part always goes to "
+        "the first desk ([Roles] and [Relay] warnings). Countermelodies on "
+        "several parts play different voices instead of doubling.",
+    ]),
+    ("Balance and full harmony", [
+        "New [Balance] warning: an accompanying part that covers the melody "
+        "is thinned out and played piano there.",
+        "Gaps in the harmony: where more than an octave is left empty "
+        "between voices, the accompaniment moves down an octave or the "
+        "piano left hand adds a chord note above the bass. Remaining gaps "
+        "are reported under [Harmony].",
+        "New [Semitones] check: invented notes a semitone away from a note "
+        "of the original are moved to a note that does not clash.",
+    ]),
+    ("Transposing instruments and chord symbols", [
+        "Scores with transposing instruments (clarinet, horn, sax, trumpet) "
+        "are read at concert pitch: notes, chord symbols and key signature. "
+        "A Bb clarinet melody used to sound a tone above the piano harmony.",
+        "A deduced chord symbol gives way to the chord the original piano "
+        "actually plays in that bar; a held bass note foreign to a new chord "
+        "is split at the change.",
+    ]),
     ("New name: ScoreCraft Edu", [
         "Arranger SMIM is now ScoreCraft Edu: new app title, new signature "
         "in the MusicXML and LilyPond files. The music is the same.",

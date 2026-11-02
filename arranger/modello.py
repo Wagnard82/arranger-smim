@@ -13,7 +13,7 @@ Convenzioni:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # --------------------------------------------------------------------------
 # Nomi delle note (italiano + anglosassone)
@@ -346,6 +346,16 @@ class Configurazione:
     ia_orchestrazione: bool = False  # staffetta della melodia frase per frase
     ia_armonia: bool = False         # revisione delle sigle poco affidabili
     ia_relazione: bool = False       # relazione didattica per il docente
+    ia_richiesta: bool = True        # personalizzazione a parole (`richiesta`)
+    richiesta: str = ""
+    # Personalizzazione a parole del docente («melodia ai flauti, niente
+    # jazz»): diventa i parametri qui sopra, mai note. La traduce il modello
+    # se l'IA e' attiva, altrimenti l'interprete a regole (`interprete.py`).
+    richiesta_applicata: Optional[Dict[str, Any]] = None
+    # Le modifiche che la richiesta ha prodotto. None = non ancora
+    # interpretata; {} = interpretata, niente da cambiare. Nelle impostazioni
+    # salvate i parametri sono gia' modificati: rigenerando, il modello non
+    # viene richiamato e l'arrangiamento e' lo stesso.
     lingua: str = "it"
     # "it" o "en": cambia SOLO come le cose si chiamano (nomi delle parti,
     # report, didascalie della partitura, testi dell'IA). Le scelte musicali

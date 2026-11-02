@@ -276,6 +276,26 @@ TESTI: Dict[str, Dict[str, str]] = {
               "changes when bass and accompaniment come from the chord "
               "symbols instead of the piano part.",
     },
+    "richiesta_titolo": {"it": "Personalizza l'arrangiamento (facoltativo)",
+                         "en": "Personalise the arrangement (optional)"},
+    "richiesta_aiuto": {
+        "it": "Scrivi a parole come lo vuoi: stile, chi porta la melodia, staffetta, "
+              "raddoppi, pause, trasporto. La richiesta diventa impostazioni del "
+              "motore: nessuna nota viene scritta a mano e la melodia non cambia. "
+              "Senza IA la legge un interprete a regole, che riconosce le frasi piu' "
+              "comuni; con l'IA attiva si capisce di piu'. Il report dice che cosa "
+              "e' stato applicato e che cosa no.",
+        "en": "Describe in words how you want it: style, who carries the melody, "
+              "relay, doublings, rests, transposition. The request becomes engine "
+              "settings: no notes are written by hand and the melody never changes. "
+              "Without AI a rule-based reader handles the most common phrases; with "
+              "the AI switched on more is understood. The report says what was "
+              "applied and what was not."},
+    "richiesta_esempio": {
+        "it": "Es.: atmosfera da film, la melodia sempre ai violini, niente "
+              "staffetta, un tono sotto.",
+        "en": "E.g.: film-music mood, melody always on the violins, no relay, "
+              "one tone lower."},
     "genera": {"it": "🎻 Genera arrangiamento", "en": "🎻 Generate arrangement"},
     "err_formazione": {"it": "Seleziona almeno uno strumento nella formazione.",
                        "en": "Select at least one instrument in the ensemble."},

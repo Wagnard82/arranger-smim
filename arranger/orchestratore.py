@@ -269,12 +269,86 @@ def pianifica_staffetta(parti: List[Parte], analisi: Analisi,
         squadra = [capo.id]
         if cfg.raddoppi_melodia and (not cfg.staffetta_melodia
                                      or len(solisti) < 2 or i in climax):
-            for p in solisti:
-                if p.id not in squadra:
-                    squadra.append(p.id)
-                    break
+            compagno = scegli_raddoppio(capo, [p for p in solisti if p is not capo])
+            if compagno is not None:
+                squadra.append(compagno.id)
         piano[i] = squadra
     return piano
+
+
+# Affinita' fra famiglie nel raddoppio della melodia (Rimskij-Korsakov,
+# cap. I e II): piu' basso = impasto migliore. Legni con legni e archi con
+# archi si fondono; i legni addolciscono gli ottoni e ispessiscono gli archi;
+# archi e ottoni insieme restano separati.
+AFFINITA_FAMIGLIE = {
+    frozenset({"fiati"}): 0, frozenset({"archi"}): 0,
+    frozenset({"ottoni"}): 1, frozenset({"fiati", "ottoni"}): 1,
+    frozenset({"fiati", "archi"}): 2, frozenset({"archi", "ottoni"}): 4,
+}
+
+
+def scegli_raddoppio(capo: Parte, candidati: List[Parte]) -> Optional[Parte]:
+    """
+    Chi raddoppia la melodia di `capo`: il candidato col miglior impasto di
+    famiglia (vedi AFFINITA_FAMIGLIE; tastiere, corde e percussioni valgono
+    3). Chi pesa piu' di chi canta e' penalizzato, perche' nell'unisono
+    prevarrebbe il suo timbro (il corno su un flauto); chi pesa piu' del
+    doppio lo coprirebbe (la tromba su un flauto) ed e' l'ultima scelta. A
+    parita', l'ordine dei candidati (idoneita').
+    """
+    st_capo = strumento(capo.strumento)
+
+    def costo(p: Parte) -> int:
+        st = strumento(p.strumento)
+        c = AFFINITA_FAMIGLIE.get(frozenset({st_capo.famiglia, st.famiglia}), 3)
+        if st.peso > 2 * st_capo.peso:
+            c += 5          # lo coprirebbe
+        elif st.peso > st_capo.peso:
+            c += 2          # nell'unisono prevarrebbe il suo timbro
+        return c
+
+    if not candidati:
+        return None
+    return min(candidati, key=lambda p: (costo(p), candidati.index(p)))
+
+
+def nota_di_aggancio(linea: List[Evento], melodia: List[Nota],
+                     frasi: List[Tuple[float, float]], ultima_frase: int,
+                     staffetta: Dict[int, List[str]], id_parte: str,
+                     ambito: Tuple[int, int]) -> Optional[Evento]:
+    """
+    Passaggio della melodia (Rimskij-Korsakov, cap. IV): l'ultima nota di
+    chi finisce coincide con la prima di chi comincia. Chi cede la melodia
+    suona anche la prima nota della frase successiva, insieme a chi la
+    riceve: un raddoppio di una nota, la melodia non cambia.
+
+    Solo se la frase dopo passa a un'altra parte e le due frasi sono
+    attaccate (al massimo un movimento di pausa fra l'una e l'altra): dopo
+    un respiro lungo non c'e' niente da agganciare. L'ottava e' quella con
+    cui la parte stava cantando, o la piu' vicina dentro l'estensione.
+    """
+    successiva = ultima_frase + 1
+    if not linea or successiva >= len(frasi) or successiva not in staffetta:
+        return None
+    if id_parte in staffetta[successiva]:
+        return None
+    a, b = frasi[successiva]
+    prima = next((n for n in sorted(melodia, key=lambda n: n.inizio)
+                  if a - 1e-6 <= n.inizio < b - 1e-6), None)
+    ultima = max(linea, key=lambda e: e.inizio)
+    if prima is None or ultima.pausa:
+        return None
+    if prima.inizio - ultima.fine > 1.0 + 1e-6 or prima.inizio < ultima.fine - 1e-6:
+        return None
+    sorgente = next((n for n in melodia if abs(n.inizio - ultima.inizio) < 1e-6), None)
+    scarto = ultima.altezze[0] - sorgente.midi if sorgente else 0
+    lo, hi = ambito
+    candidate = [prima.midi + scarto + k for k in (0, -12, 12)
+                 if lo <= prima.midi + scarto + k <= hi]
+    if not candidate:
+        return None
+    altezza = min(candidate, key=lambda x: abs(x - ultima.altezze[0]))
+    return Evento(inizio=prima.inizio, durata=prima.durata, altezze=[altezza])
 
 
 def _climax(analisi: Analisi) -> List[int]:
@@ -458,8 +532,52 @@ def _ottava_migliore(midis: List[int], lo: int, hi: int,
 
 
 def linea_controcanto(analisi: Analisi, st: Strumento, liv: str,
-                      stile: str) -> List[Evento]:
-    """Controcanto: note tenute dell'accordo in moto contrario alla melodia."""
+                      stile: str, voce: int = 0) -> List[Evento]:
+    """
+    Controcanto: note tenute dell'accordo in moto contrario alla melodia.
+
+    `voce` distingue le parti di controcanto: la prima (0) tiene la linea,
+    le altre scendono di `voce` note dell'accordo sotto di lei (una terza,
+    una quarta: la seconda voce, poi la terza). Prima tutte le parti di
+    controcanto suonavano la stessa linea, nota per nota, e il registro
+    medio restava vuoto (Cinema Paradiso in 1a Media).
+    """
+    base = _linea_controcanto(analisi, st, liv, stile)
+    if voce <= 0:
+        return base
+    lo, hi = st.ambito(liv)
+    ev: List[Evento] = []
+    for e in base:
+        if e.pausa or len(e.altezze) != 1:
+            ev.append(e)
+            continue
+        v = e.altezze[0]
+        acc = _accordo_a(analisi.armonia, e.inizio)
+        pcs = acc.note_accordo() if acc else [v % 12]
+        mel = [n.midi for n in analisi.melodia
+               if n.inizio - 1e-6 <= e.inizio < n.inizio + n.durata - 1e-6]
+        # la nota della melodia no: una voce interna che la raddoppia non
+        # aggiunge armonia (e la correzione dei buchi non la puo' spostare)
+        if mel and len(pcs) > 1:
+            pcs = [pc for pc in pcs if pc != mel[0] % 12] or pcs
+        tutte = [x for x in range(lo, hi + 1) if x % 12 in pcs]
+        sotto = sorted((x for x in tutte if x < v), reverse=True)
+        if len(sotto) >= voce:
+            nuova = sotto[voce - 1]
+        elif sotto:
+            nuova = sotto[-1]
+        else:
+            # niente sotto nell'estensione: una nota dell'accordo sopra la
+            # prima voce ma sotto la melodia, altrimenti l'unisono
+            sopra = [x for x in tutte if v < x < (mel[0] if mel else v)]
+            nuova = min(sopra) if sopra else v
+        ev.append(Evento(inizio=e.inizio, durata=e.durata, altezze=[nuova],
+                         articolazione=e.articolazione))
+    return _fondi_uguali(ev)
+
+
+def _linea_controcanto(analisi: Analisi, st: Strumento, liv: str,
+                       stile: str) -> List[Evento]:
     lo, hi = st.ambito(liv)
     L = livello(liv)
     ev: List[Evento] = []
@@ -1198,6 +1316,89 @@ def orchestra_tessitura(sp: Spartito, analisi: Analisi, parti: List[Parte],
     return resoconto
 
 
+def raddoppia_melodia(voce: List[Nota], melodia: List[Nota]) -> bool:
+    """True se almeno il 60% delle note della voce suona, a meno
+    dell'ottava, la nota che la melodia ha in quel momento."""
+    if not voce or not melodia:
+        return False
+    uguali = 0
+    for n in voce:
+        m = next((x for x in melodia
+                  if x.inizio - 1e-6 <= n.inizio < x.inizio + x.durata - 1e-6), None)
+        if m is not None and m.midi % 12 == n.midi % 12:
+            uguali += 1
+    return uguali * 5 >= len(voce) * 3
+
+
+# Importanza dei ruoli per l'ordine dei leggii: la parte piu' esposta va al
+# primo leggio, che nelle orchestre scolastiche e' il piu' sicuro
+IMPORTANZA_RUOLO = {"melodia": 3, "controcanto": 2, "armonia": 1, "basso": 1,
+                    "ritmo": 0}
+
+
+def _leggii(parti: List[Parte], strumento_: str) -> List[Parte]:
+    return sorted((p for p in parti if p.strumento == strumento_),
+                  key=lambda p: p.variante)
+
+
+def _puo_cedere(primo: Parte, secondo: Parte, cfg: Configurazione) -> bool:
+    """Il primo leggio puo' prendere il posto del secondo: non e' di un
+    livello piu' basso (se il docente ha messo al secondo leggio un allievo
+    piu' avanti, la scelta e' sua) e il secondo non e' stato scelto a mano
+    come solista."""
+    if secondo.id in (cfg.strumenti_melodia or []):
+        return False
+    return (primo.livello or cfg.livello) >= (secondo.livello or cfg.livello)
+
+
+def melodia_ai_primi_leggii(parti: List[Parte], cfg: Configurazione) -> List[str]:
+    """
+    Fra i leggii dello stesso strumento il ruolo piu' esposto va sempre al
+    primo: nelle orchestre scolastiche le seconde parti sono le piu' deboli.
+    Se la distribuzione ha dato la melodia al Flauto 2 e il controcanto al
+    Flauto 1, i due ruoli si scambiano (Akatsuki no Requiem, 3a Media).
+    """
+    note: List[str] = []
+    for chiave in sorted({p.strumento for p in parti}):
+        leggii = _leggii(parti, chiave)
+        for k in range(1, len(leggii)):
+            for j in range(k):
+                primo, secondo = leggii[j], leggii[k]
+                if (IMPORTANZA_RUOLO.get(secondo.ruolo, 1)
+                        > IMPORTANZA_RUOLO.get(primo.ruolo, 1)
+                        and _puo_cedere(primo, secondo, cfg)):
+                    primo.ruolo, secondo.ruolo = secondo.ruolo, primo.ruolo
+                    note.append(testo("ruoli_leggii", cfg.lingua,
+                                      primo=primo.nome, secondo=secondo.nome))
+    return note
+
+
+def staffetta_ai_primi_leggii(staffetta: Dict[int, List[str]], parti: List[Parte],
+                              cfg: Configurazione) -> int:
+    """
+    Nella staffetta un secondo leggio non canta mai da solo: se in una frase
+    la melodia tocca al Violino 2 e il Violino 1 non c'e', la prende il
+    Violino 1 (il secondo puo' solo raddoppiarlo). Ritorna le frasi corrette.
+    """
+    per_id = {p.id: p for p in parti}
+    corrette = 0
+    for i, squadra in staffetta.items():
+        nuova: List[str] = []
+        for pid in squadra:
+            p = per_id.get(pid)
+            if p is not None and p.variante > 0:
+                primo = _leggii(parti, p.strumento)[0]
+                if (primo is not p and primo.id not in squadra
+                        and primo.ruolo == "melodia" and _puo_cedere(primo, p, cfg)):
+                    pid = primo.id
+            if pid not in nuova:
+                nuova.append(pid)
+        if nuova != squadra:
+            staffetta[i] = nuova
+            corrette += 1
+    return corrette
+
+
 def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
              piano_melodia: Optional[Dict[int, List[str]]] = None) -> Partitura:
     parti = costruisci_parti(cfg)
@@ -1215,6 +1416,7 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                 p.ruolo = "melodia"
             elif p.ruolo == "melodia":
                 p.ruolo = "controcanto"
+    resoconto_ruoli.extend(melodia_ai_primi_leggii(parti, cfg))
     # la figurazione originale si conserva dalla 2a media in su: in 1a i
     # valori brevi e i salti degli arpeggi non sono ancora alla portata
     usa_figurazione = (livello(cfg.livello).durata_minima <= 0.5
@@ -1223,14 +1425,21 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
     # della staffetta: chi ha una seconda voce da suonare non deve anche
     # contendersi la melodia
     contrappunti = [p for p in parti if p.ruolo == "controcanto"]
+    # una «voce interna» che raddoppia la melodia (la destra del pianoforte
+    # che suona il canto del solista, Akatsuki no Requiem) non e' una seconda
+    # voce: la melodia la porta gia' la staffetta, e data al controcanto
+    # finiva al Flauto 2 piu' che al Flauto 1
+    voci_interne = [v for v in analisi.voci_interne
+                    if not raddoppia_melodia(v, analisi.melodia)]
     voci_assegnate: Dict[str, List[Nota]] = {}
     if usa_figurazione:          # dalla 2a media in su
         for i, p_c in enumerate(contrappunti):
-            if i < len(analisi.voci_interne):
-                voci_assegnate[p_c.id] = analisi.voci_interne[i]
+            if i < len(voci_interne):
+                voci_assegnate[p_c.id] = voci_interne[i]
 
     staffetta = piano_melodia or pianifica_staffetta(
         parti, analisi, cfg, tonalita, set(_climax(analisi)), misure)
+    frasi_ai_primi = staffetta_ai_primi_leggii(staffetta, parti, cfg)
     if piano_melodia:
         for ids in piano_melodia.values():
             for i in ids:
@@ -1288,6 +1497,14 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
         part.report.append(testo("tessitura_brano", lingua))
         return part
 
+    agganci = 0     # passaggi della melodia agganciati con una nota in comune
+    # le parti di controcanto senza una voce dell'originale: la prima tiene la
+    # linea, le altre prendono le voci sotto (vedi `linea_controcanto`).
+    # Glockenspiel e metallofono sono colore: raddoppiano la prima voce e non
+    # contano nella numerazione
+    voci_controcanto = [p.id for p in parti
+                        if p.ruolo == "controcanto" and p.id not in voci_assegnate
+                        and strumento(p.strumento).famiglia != "percussioni"]
     for p in parti:
         # Il livello di QUESTA parte: in una classe eterogenea ogni
         # strumento puo' avere il suo, e tutto il materiale che segue —
@@ -1314,9 +1531,17 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
         for blocco in _blocchi_contigui(porta_melodia):
             a = frasi[blocco[0]][0] if blocco[0] < len(frasi) else inizio
             b = frasi[blocco[-1]][1] if blocco[-1] < len(frasi) else fine
-            ev_melodia.extend(linea_melodia(
+            linea = linea_melodia(
                 analisi.melodia, st, liv_p, (a, b),
-                minimo=AMBITO_MANI[1][0] if p.righi == 2 else None))
+                minimo=AMBITO_MANI[1][0] if p.righi == 2 else None)
+            ev_melodia.extend(linea)
+            if cfg.staffetta_melodia:
+                aggancio = nota_di_aggancio(linea, analisi.melodia, frasi,
+                                            blocco[-1], staffetta, p.id,
+                                            st.ambito(liv_p))
+                if aggancio is not None:
+                    ev_melodia.append(aggancio)
+                    agganci += 1
 
         # glockenspiel raddoppia la melodia nei climax (cinematico)
         if cfg.stile == "Cinematico" and p.strumento in ("glockenspiel", "metallofono"):
@@ -1439,7 +1664,9 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                 elif cfg.stile == "Cinematico" and st.famiglia == "archi":
                     ev.extend(archi_cinematici(sotto, st, liv_p, mis_sub))
                 else:
-                    ev.extend(linea_controcanto(sotto, st, liv_p, cfg.stile))
+                    ev.extend(linea_controcanto(sotto, st, liv_p, cfg.stile,
+                                                voce=voci_controcanto.index(p.id)
+                                                if p.id in voci_controcanto else 0))
 
             else:  # armonia
                 if st.monofonico:
@@ -1518,7 +1745,7 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
         # tutto il materiale dell'originale va sfruttato: voci interne rimaste
         # fuori e incisi vengono affidati a chi tace, o a chi sta solo
         # riempiendo l'armonia
-        residuo = [seg for seg in analisi.voci_interne
+        residuo = [seg for seg in voci_interne
                    if not any(seg is v for v in voci_assegnate.values())]
         materiale = sorted(residuo + analisi.frammenti,
                            key=lambda seg: seg[0].inizio)
@@ -1526,7 +1753,12 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                                                   cfg.livello, misure,
                                                   lingua=cfg.lingua))
 
+    if frasi_ai_primi:
+        part.report.append(testo("staffetta_primi_leggii", lingua, n=frasi_ai_primi))
+    if agganci:
+        part.report.append(testo("staffetta_aggancio", lingua, n=agganci))
     part.report.extend(alleggerisci_per_solista(part, analisi))
+    part.report.extend(equilibra_sonorita(part, analisi))
     part.report.extend(riempi_silenzi_lunghi(part, analisi, cfg, misure))
     part.report.extend(resoconto_ruoli)
 
@@ -1714,9 +1946,93 @@ def alleggerisci_per_solista(part: Partitura, analisi: Analisi) -> List[str]:
             for p in part.parti:
                 if p is solista or p.ruolo == "melodia":
                     continue      # gli altri solisti raddoppiano: e' voluto
-                _dirada_parte(p, a, b, attacchi_melodia)
+                _dirada_parte(p, a, b, attacchi_melodia, ripristina=True)
         note_report.append(testo("solista_alleggerito", part.lingua,
                                  parte=solista.nome, n=len(tratti)))
+    return note_report
+
+
+# Equilibrio (Rimskij-Korsakov, cap. I): una parte d'accompagnamento copre
+# chi canta se pesa piu' del doppio, o l'accompagnamento intero se pesa piu'
+# di tanto quanto la melodia
+COPRE_SINGOLA = 2.0
+COPRE_INSIEME = 5.0
+
+
+def _canta_nel_tratto(p: Parte, a: float, b: float,
+                      attacchi_melodia: Dict[float, int]) -> bool:
+    """True se nel tratto la parte suona soprattutto la melodia (anche
+    all'ottava, come nota piu' acuta, per piu' di meta' delle note): e' chi
+    canta o un suo raddoppio, non accompagnamento."""
+    dentro = [e for e in p.eventi if not e.pausa and a - 1e-6 <= e.inizio < b - 1e-6]
+    if not dentro:
+        return False
+    # conta la nota piu' acuta: un accordo che contiene per caso la nota
+    # della melodia e' accompagnamento, non un raddoppio
+    uguali = sum(1 for e in dentro
+                 if round(e.inizio, 6) in attacchi_melodia
+                 and max(e.altezze) % 12 == attacchi_melodia[round(e.inizio, 6)] % 12)
+    return uguali * 2 > len(dentro)
+
+
+def equilibra_sonorita(part: Partitura, analisi: Analisi) -> List[str]:
+    """
+    Generalizza `alleggerisci_per_solista` con i pesi di sonorita' degli
+    strumenti (`Strumento.peso`). In ogni tratto in cui qualcuno canta, si
+    sommano i pesi di chi porta la melodia (con i raddoppi) e si guardano le
+    parti che accompagnano:
+      - una parte che pesa piu' di COPRE_SINGOLA volte la melodia la copre
+        (una tromba sotto un flauto);
+      - se l'accompagnamento intero supera COPRE_INSIEME volte la melodia,
+        si diradano le parti piu' pesanti finche' non rientra.
+    Le parti che coprono si diradano come per i solisti deboli (piano,
+    accordi a due note, niente raddoppi della melodia) e alla fine del tratto
+    ritrovano la dinamica di prima. I solisti deboli restano a
+    `alleggerisci_per_solista`, che li protegge sempre.
+    """
+    note_report: List[str] = []
+    attacchi_melodia = {round(n.inizio, 6): n.midi for n in analisi.melodia}
+    fatti: set = set()
+    diradati: Dict[str, List[str]] = {}
+    for solista in part.parti:
+        if solista.ruolo != "melodia" or solista.strumento in SOLISTI_DEBOLI:
+            continue
+        for (a, b) in _tratti_solista(solista, attacchi_melodia):
+            cantano = [p for p in part.parti
+                       if _canta_nel_tratto(p, a, b, attacchi_melodia)]
+            if solista not in cantano:
+                continue
+            peso_melodia = sum(strumento(p.strumento).peso for p in cantano)
+            accompagnano = [p for p in part.parti if p not in cantano and any(
+                not e.pausa and e.inizio < b - 1e-6 and e.fine > a + 1e-6
+                for e in p.eventi)]
+            accompagnano.sort(key=lambda p: -strumento(p.strumento).peso)
+            pesanti = [p for p in accompagnano
+                       if strumento(p.strumento).peso > COPRE_SINGOLA * peso_melodia]
+            totale = sum(strumento(p.strumento).peso for p in accompagnano)
+            for p in accompagnano:
+                if totale - sum(strumento(q.strumento).peso for q in pesanti) \
+                        <= COPRE_INSIEME * peso_melodia:
+                    break
+                if p not in pesanti:
+                    pesanti.append(p)
+            for p in pesanti:
+                chiave = (p.id, round(a, 6), round(b, 6))
+                if chiave in fatti:
+                    continue
+                fatti.add(chiave)
+                _dirada_parte(p, a, b, attacchi_melodia, ripristina=True)
+                inizio, fine = (_numero_misura(part.misure, a),
+                                _numero_misura(part.misure, b - 1e-3))
+                mis = inizio if inizio == fine else f"{inizio}-{fine}"
+                diradati.setdefault(p.nome, [])
+                if mis not in diradati[p.nome]:
+                    diradati[p.nome].append(mis)
+    for nome, misure in diradati.items():
+        misure.sort(key=lambda m: int(m.split("-")[0]) if m.split("-")[0].isdigit() else 0)
+        note_report.append(testo(
+            "equilibrio", part.lingua, parte=nome,
+            misure=", ".join(misure[:8]) + (", ..." if len(misure) > 8 else "")))
     return note_report
 
 
@@ -1735,8 +2051,12 @@ def _tratti_solista(parte: Parte, attacchi_melodia: Dict[float, int],
 
 
 def _dirada_parte(p: Parte, a: float, b: float,
-                  attacchi_melodia: Dict[float, int]) -> None:
+                  attacchi_melodia: Dict[float, int],
+                  ripristina: bool = False) -> None:
     st = strumento(p.strumento)
+    # dinamica in vigore prima del tratto, da rimettere dopo (`ripristina`)
+    segnate = [e for e in p.eventi if e.dinamica and e.inizio <= a + 1e-6]
+    prima = max(segnate, key=lambda e: e.inizio).dinamica if segnate else "mf"
     nuovi: List[Evento] = []
     for e in p.eventi:
         if e.pausa or not (e.inizio < b - 1e-6 and e.fine > a + 1e-6):
@@ -1766,6 +2086,11 @@ def _dirada_parte(p: Parte, a: float, b: float,
                   if not e.pausa and a - 1e-6 <= e.inizio < b - 1e-6), None)
     if primo is not None:
         primo.dinamica = "p"
+        if ripristina:
+            dopo = next((e for e in sorted(nuovi, key=lambda e: e.inizio)
+                         if not e.pausa and e.inizio >= b - 1e-6), None)
+            if dopo is not None and not dopo.dinamica and prima != "p":
+                dopo.dinamica = prima
 
 
 def distribuisci_frammenti(parti: List[Parte], frammenti: List[List[Nota]],

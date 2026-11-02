@@ -2,7 +2,7 @@
 
 *Fino alla 0.9.5 il progetto si chiamava Arranger SMIM.*
 
-**Versione 0.9.6.** Il registro delle modifiche vive in `arranger/versione.py`
+**Versione 0.9.7.** Il registro delle modifiche vive in `arranger/versione.py`
 (`VERSIONE`, `NOVITA`) ed e' mostrato dall'interfaccia in una colonna a destra:
 chi prova una versione nuova deve sapere che cosa e' cambiato senza andarlo a
 cercare. La stessa versione finisce nel tag `<software>` del MusicXML e nel
@@ -94,6 +94,45 @@ arrangiamento, validazione ed export sono scritti sulla libreria standard. Ne
 consegue che gira su Windows 10 senza toolchain di compilazione e resta
 testabile in CI. `music21` non e' richiesto (in particolare per l'anacrusi, che
 viene gestita nativamente).
+
+---
+
+## Nuova interfaccia web (scorecraftedu.com)
+
+`server.py` serve la landing (`landing/index.html`) e la nuova app
+(`landing/app.html`), e le collega al motore con poche API JSON. Come il
+nucleo, usa solo la libreria standard: e' un'applicazione WSGI.
+
+```bash
+python server.py                 # http://localhost:8600  (landing)
+                                 # http://localhost:8600/app
+```
+
+In produzione, sull'host di scorecraftedu.com, lo stesso oggetto si serve con
+un server WSGI, per esempio `gunicorn server:applicazione --bind 0.0.0.0:$PORT`.
+Le credenziali per la mail di feedback si leggono dalle variabili d'ambiente
+`SCORECRAFT_SMTP_MITTENTE`, `_PASSWORD`, `_DESTINATARIO`, `_SERVER`, `_PORTA`
+oppure, in locale, da `.streamlit/secrets.toml`.
+
+L'app chiede l'accesso: il docente scrive l'email e riceve un link valido 20
+minuti (niente password). Utenti, sessioni, contatore del piano Free (3
+arrangiamenti al mese) e lista d'attesa dei piani a pagamento stanno in
+`account.py`, in un database SQLite (`SCORECRAFT_DB`, in locale
+`dati/scorecraft.db`, escluso da git): sull'host serve un disco persistente.
+Per provare in locale senza mandare mail:
+
+```bash
+SCORECRAFT_SENZA_MAIL=1 python server.py   # il link di accesso compare nella pagina
+```
+
+La pagina `/prezzi` mostra il listino (Free, Singolo brano, Docente, Docente +
+IA in arrivo); finche' i pagamenti non sono attivi, i piani a pagamento
+raccolgono l'iscrizione alla lista d'attesa con doppia conferma via email.
+
+Rispetto all'app Streamlit alcune opzioni sono fisse: nessuno strumento resta
+fermo a lungo (sempre attivo), pausa massima di 2 misure, niente sorgente
+LilyPond, niente intelligenza artificiale. Il livello si indica per leggio.
+Landing e app sono in italiano e in inglese (`?lang=en`).
 
 ---
 

@@ -34,6 +34,15 @@ class Strumento:
     percussione: bool = False
     # nota: per gli archi, prima posizione = limite superiore stretto al livello 1
     corde: List[int] = field(default_factory=list)
+    # Note dentro l'estensione ma scomode a quel livello (MIDI a suono reale,
+    # enarmonia indifferente). Non si correggono: finiscono solo come avviso
+    # nel report, vedi `vincoli.avviso_note_scomode`.
+    note_scomode: Dict[str, tuple] = field(default_factory=dict)
+    # Peso di sonorita' nel forte di UNA parte (un leggio di ragazzi), per
+    # l'equilibrio fra chi canta e chi accompagna. Da Rimskij-Korsakov (1
+    # tromba = 2 corni = 4 legni), adattato alla scuola: un leggio d'archi
+    # di due o tre ragazzi vale circa un legno. Vedi `equilibra_sonorita`.
+    peso: float = 1.0
 
     def ambito(self, livello: str) -> tuple:
         from .lingua import normalizza_livello
@@ -61,13 +70,13 @@ REGISTRO: Dict[str, Strumento] = {
         ruoli=["melodia", "controcanto", "armonia"],
     ),
     "sax": Strumento(
-        chiave="sax", nome="Sax Contralto", abbrev="Sax A.",
+        chiave="sax", peso=2.0, nome="Sax Contralto", abbrev="Sax A.",
         estensione={"1a Media": (58, 72), "2a Media": (56, 77), "3a Media": (51, 84)},
         trasposizione=9, programma_midi=65, famiglia="fiati",
         ruoli=["melodia", "controcanto", "armonia"],
     ),
     "corno": Strumento(
-        chiave="corno", nome="Corno in Fa", abbrev="Cr.",
+        chiave="corno", peso=2.0, nome="Corno in Fa", abbrev="Cr.",
         # Scritto una quinta giusta sopra il suono reale. Estensioni a suono
         # reale, ricavate dagli ambiti scritti tipici dei primi anni (DA
         # VERIFICARE con un docente di corno):
@@ -79,25 +88,41 @@ REGISTRO: Dict[str, Strumento] = {
         ruoli=["melodia", "controcanto", "armonia"],
     ),
     "tromba": Strumento(
-        chiave="tromba", nome="Tromba in Sib", abbrev="Tr.",
+        chiave="tromba", peso=4.0, nome="Tromba in Sib", abbrev="Tr.",
         estensione={"1a Media": (58, 72), "2a Media": (56, 77), "3a Media": (54, 82)},
         trasposizione=2, programma_midi=56, famiglia="ottoni",
         ruoli=["melodia", "controcanto", "armonia"],
     ),
     "violino": Strumento(
         chiave="violino", nome="Violino", abbrev="Vl.",
-        estensione={"1a Media": (55, 76), "2a Media": (55, 81), "3a Media": (55, 88)},
+        # 1a Media: prima posizione intera, fino al Si5 col 4o dito sul Mi
+        # (guida Alfred grado 1 e programma di violino di una collega: vedi
+        # docs/principi_arrangiamento.md). Prima si fermava al Mi a vuoto.
+        # La 2a Media (prima 81) sale almeno quanto la 1a; la terza posizione
+        # (fino al Mi6) resta da decidere.
+        estensione={"1a Media": (55, 83), "2a Media": (55, 83), "3a Media": (55, 88)},
         programma_midi=40, famiglia="archi", corde=[55, 62, 69, 76],
+        # prima e seconda applicazione: mancano il 1o dito basso e il 3o
+        # dito alto su ogni corda (Lab3 Do#4 Mib4 Sol#4 Sib4 Re#5 Fa5 La#5)
+        note_scomode={"1a Media": (56, 61, 63, 68, 70, 75, 77, 82)},
         ruoli=["melodia", "controcanto", "armonia"],
     ),
     "violoncello": Strumento(
         chiave="violoncello", nome="Violoncello", abbrev="Vc.",
-        estensione={"1a Media": (36, 57), "2a Media": (36, 62), "3a Media": (36, 72)},
+        # 1a Media: prima posizione stretta, fino al Re4 col 4o dito sul La
+        # (prima si fermava al La a vuoto). 3a Media: fino al Sol4, il Sol con
+        # tre tagli sopra il pentagramma in chiave di basso (prima Do5, troppo
+        # alto). Confermato da un docente di violoncello il 30/10/2026: vedi
+        # docs/principi_arrangiamento.md
+        estensione={"1a Media": (36, 62), "2a Media": (36, 62), "3a Media": (36, 67)},
         chiave_musicale="F", programma_midi=42, famiglia="archi", corde=[36, 43, 50, 57],
+        # senza estensioni della mano: mancano +1 e +6 sopra ogni corda vuota
+        # (Do#2 Fa#2 Sol#2 Do#3 Mib3 Sol#3 Sib3; il Re#4 e' gia' fuori)
+        note_scomode={"1a Media": (37, 42, 44, 49, 51, 56, 58)},
         ruoli=["basso", "armonia", "controcanto", "melodia"],
     ),
     "chitarra": Strumento(
-        chiave="chitarra", nome="Chitarra", abbrev="Chit.",
+        chiave="chitarra", peso=0.5, nome="Chitarra", abbrev="Chit.",
         estensione={"1a Media": (40, 64), "2a Media": (40, 69), "3a Media": (40, 76)},
         chiave_musicale="G", ottava_chiave=-1, monofonico=False, polifonia_max=6,
         programma_midi=24, famiglia="corde", puo_sigle=True,
@@ -105,7 +130,7 @@ REGISTRO: Dict[str, Strumento] = {
         ruoli=["armonia", "ritmo", "melodia", "basso"],
     ),
     "pianoforte": Strumento(
-        chiave="pianoforte", nome="Pianoforte", abbrev="Pf.",
+        chiave="pianoforte", peso=2.0, nome="Pianoforte", abbrev="Pf.",
         # il pianoforte legge in due chiavi: il registro grave non e' un
         # problema di difficolta', e comprimerlo snatura i bassi
         estensione={"1a Media": (36, 84), "2a Media": (33, 88), "3a Media": (28, 96)},
@@ -126,7 +151,7 @@ REGISTRO: Dict[str, Strumento] = {
         ruoli=["melodia", "armonia", "controcanto"],
     ),
     "percussioni": Strumento(
-        chiave="percussioni", nome="Percussioni", abbrev="Perc.",
+        chiave="percussioni", peso=2.0, nome="Percussioni", abbrev="Perc.",
         estensione={"1a Media": (38, 38), "2a Media": (38, 42), "3a Media": (35, 51)},
         chiave_musicale="percussion", monofonico=False, polifonia_max=3,
         programma_midi=0, famiglia="percussioni", percussione=True,

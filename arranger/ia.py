@@ -153,8 +153,15 @@ def disponibile() -> bool:
     return libreria_presente() and bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
+# Ultimo errore dell'API (credito esaurito, chiave errata, modello ritirato):
+# le funzioni IA degradano in silenzio, ma il report lo puo' riportare.
+ULTIMO_ERRORE: Optional[str] = None
+
+
 def _chiama(prompt: str, sistema: str, modello: str = MODELLO_DEFAULT,
             max_token: int = 1500) -> Optional[str]:
+    global ULTIMO_ERRORE
+    ULTIMO_ERRORE = None
     try:
         import anthropic
         client = anthropic.Anthropic()
@@ -163,7 +170,12 @@ def _chiama(prompt: str, sistema: str, modello: str = MODELLO_DEFAULT,
             messages=[{"role": "user", "content": prompt}],
         )
         return "".join(b.text for b in risp.content if getattr(b, "type", "") == "text")
-    except Exception:
+    except Exception as e:
+        messaggio = getattr(e, "message", None) or str(e)
+        corpo = getattr(e, "body", None)
+        if isinstance(corpo, dict):
+            messaggio = (corpo.get("error") or {}).get("message", messaggio)
+        ULTIMO_ERRORE = str(messaggio)[:200]
         return None
 
 
@@ -370,6 +382,53 @@ def revisiona_armonia(analisi: Analisi, cfg: Configurazione,
         except ValueError:
             continue
     return fuori or None
+
+
+def interpreta_richiesta(cfg: Configurazione, id_parti: Dict[str, str],
+                         titolo: str = "") -> Optional[dict]:
+    """
+    Traduce la richiesta del docente (`cfg.richiesta`) nei parametri del
+    motore. Il modello sceglie solo fra i parametri e i valori elencati in
+    `richiesta.PARAMETRI`; quello che non si puo' esprimere cosi' lo elenca
+    in "non_applicabili". La validazione vera la fa `richiesta.applica`.
+
+    Ritorna {"modifiche": {...}, "non_applicabili": [...], "spiegazione": ""}
+    oppure None (IA spenta o risposta inutilizzabile).
+    """
+    if not cfg.richiesta.strip() or not cfg.ia_attiva("richiesta") or not disponibile():
+        return None
+    from .richiesta import descrizione_parametri
+    sistema = (
+        "Sei l'assistente di un software che arrangia brani per l'orchestra di "
+        "una scuola media a indirizzo musicale. Il docente descrive a parole "
+        "come vuole l'arrangiamento; tu traduci la richiesta nelle impostazioni "
+        "del motore, e in nient'altro. Non scrivi note e non cambi la melodia: "
+        "le scelte musicali le fa il motore, con le sue regole didattiche.\n"
+        "Regole:\n"
+        "- usa solo i parametri elencati, con i valori esattamente come scritti;\n"
+        "- cambia solo cio' che la richiesta chiede, anche implicitamente; non "
+        "toccare il resto;\n"
+        "- livello, organico e numero di leggii li sceglie il docente nel "
+        "pannello: se la richiesta li riguarda, mettila fra i non applicabili "
+        "e di' dove cambiarli;\n"
+        "- ogni parte della richiesta che i parametri non possono esprimere "
+        "(una nota precisa, un'introduzione nuova, una dinamica in una misura, "
+        "cambiare la melodia) va fra i non applicabili, in una frase breve;\n"
+        "- rispondi SOLO con JSON valido.")
+    prompt = (
+        f"Brano: {titolo or '(senza titolo)'}\n"
+        f"Livello: {cfg.livello}\n"
+        f"Parti dell'organico (id e nome): "
+        + ", ".join(f"{k} = {v}" for k, v in id_parti.items()) + "\n\n"
+        f"Parametri modificabili:\n{descrizione_parametri(cfg, id_parti)}\n\n"
+        f"Richiesta del docente:\n<<<\n{cfg.richiesta.strip()}\n>>>\n\n"
+        'Rispondi: {"modifiche": {"parametro": valore, ...}, '
+        '"non_applicabili": ["...", ...], "spiegazione": "una frase"}\n'
+        f"Scrivi spiegazione e non applicabili in {_lingua_risposta(cfg)}.")
+    dati = _json(_chiama(prompt, sistema, cfg.modello_ia, max_token=1500))
+    if not isinstance(dati, dict):
+        return None
+    return dati
 
 
 def relazione_didattica(part: Partitura, cfg: Configurazione) -> Optional[str]:
