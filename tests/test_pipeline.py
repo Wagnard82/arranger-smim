@@ -4099,6 +4099,14 @@ def test_tonalita_comoda(inno):
     cfg = Configurazione(formazione={"flauto": 2, "violino": 2}, livello="2a Media")
     verifica(tonalita.suggerisci_trasporto(ingestione.ingerisci(inno), cfg) is None,
              "Do con flauti e violini: nessun suggerimento")
+    # in 1a Media i fiati in Sib reggono 2 alterazioni (conferma del docente,
+    # 2/11/2026): l'Inno in Do con l'organico predefinito della nuova
+    # interfaccia (clarinetto e tromba in Re) non chiede nessun trasporto
+    cfg = Configurazione(formazione={"flauto": 2, "clarinetto": 1, "tromba": 1, "violino": 2,
+                                     "violoncello": 1, "pianoforte": 1, "percussioni": 1},
+                         livello="1a Media")
+    s0 = tonalita.suggerisci_trasporto(ingestione.ingerisci(inno), cfg)
+    verifica(s0 is None, f"Inno in Do, organico predefinito, 1a Media: niente ({s0})")
     # i livelli per strumento contano: clarinetti di 3a Media reggono Mi
     cfg = Configurazione(formazione={"clarinetto": 2}, livello="1a Media",
                          livelli_strumenti={"clarinetto": "3a Media"})

@@ -33,8 +33,10 @@ from .lingua import nome_strumento, t
 from .modello import Configurazione, Nota, Spartito
 from .strumenti import strumento
 
-# alterazioni in chiave che un leggio regge senza fatica, per livello
-TOLLERANZA = {"1a Media": 1, "2a Media": 3, "3a Media": 4}
+# alterazioni in chiave che un leggio regge senza fatica, per livello.
+# 1a Media: 2, confermato dal docente il 2/11/2026 (con 1 l'Inno in Do
+# chiedeva Fa solo perche' clarinetto e tromba leggono in Re)
+TOLLERANZA = {"1a Media": 2, "2a Media": 3, "3a Media": 4}
 TRASPORTI = range(-5, 7)
 # archi e chitarra leggono meglio i diesis (corde vuote): i bemolli pesano di
 # piu'; il pianoforte regge tutto, le percussioni non leggono armature
