@@ -460,4 +460,103 @@ def armonizza(sp: Spartito, melodia: List[Nota],
         accordi.append(Accordo(inizio=t.inizio, durata=t.fine - t.inizio,
                                fondamentale=c.fondamentale, qualita=c.qualita,
                                confidenza=0.5))
-    return accordi
+    return scegli_bassi(accordi, note, pesi)
+
+
+# --------------------------------------------------------------------------
+# 7. Rivolti: il basso come linea (P8)
+# --------------------------------------------------------------------------
+
+_RIVOLTO = 0.15          # a parita' di altro vince lo stato fondamentale
+_CONTRARIO = 0.2         # premio per il moto contrario alla melodia
+_RIPETUTO = 0.2          # stesso basso di prima su un accordo diverso
+
+
+def _moto(da: int, a: int) -> int:
+    """Il moto piu' breve fra due classi d'altezza, con il segno (-6..6)."""
+    d = (a - da) % 12
+    return d - 12 if d > 6 else d
+
+
+def _costo_moto(d: int) -> float:
+    d = abs(d)
+    if d <= 2:
+        return 0.0          # grado congiunto (o nota ripetuta)
+    if d <= 4:
+        return 0.3          # terza
+    if d == 5:
+        return 0.6          # quarta o quinta
+    return 1.0              # tritono
+
+
+def scegli_bassi(accordi: List[Accordo], melodia: List[Nota],
+                 pesi: Pesi) -> List[Accordo]:
+    """
+    Sceglie per ogni accordo lo stato fondamentale o il primo rivolto,
+    trattando il basso come una seconda melodia: grado congiunto e moto
+    contrario alla melodia, niente basso fermo su accordi diversi. Il V e
+    il I della cadenza finale restano in stato fondamentale. Il risultato
+    va in `Accordo.basso` (slash chord) quando il basso non e' la
+    fondamentale.
+
+    Semplificazioni rispetto a Piston, da rivedere col docente: la quarta e
+    sesta di cadenza e il limite delle tre seste parallele non sono ancora
+    gestiti.
+    """
+    if not accordi:
+        return []
+    note = sorted(melodia, key=lambda n: n.inizio)
+
+    def prima_nota(a: Accordo) -> Optional[int]:
+        dentro = [n for n in note if a.inizio - 1e-6 <= n.inizio < a.fine - 1e-6]
+        return dentro[0].midi if dentro else None
+
+    def ultima_nota(a: Accordo) -> Optional[int]:
+        dentro = [n for n in note if n.inizio < a.fine - 1e-6 and n.fine > a.inizio + 1e-6]
+        return dentro[-1].midi if dentro else None
+
+    def opzioni(i: int) -> List[int]:
+        a = accordi[i]
+        radice = a.fondamentale
+        n = len(accordi)
+        # cadenza finale: V - I in stato fondamentale (P11)
+        if i == n - 1 or (i == n - 2 and (accordi[-1].fondamentale - radice) % 12 == 5):
+            return [radice]
+        pc = a.note_accordo()
+        return [radice, pc[1]] if len(pc) > 1 else [radice]
+
+    costi: List[Dict[int, float]] = [{b: (0.0 if b == accordi[0].fondamentale else _RIVOLTO)
+                                      for b in opzioni(0)}]
+    da: List[Dict[int, int]] = [{}]
+    for i in range(1, len(accordi)):
+        a, prec = accordi[i], accordi[i - 1]
+        m1, m0 = prima_nota(a), ultima_nota(prec)
+        riga, prov = {}, {}
+        for b in opzioni(i):
+            migliore, origine = None, None
+            for bp, cp in costi[-1].items():
+                d = _moto(bp, b)
+                c = cp + _costo_moto(d)
+                if b != a.fondamentale:
+                    c += _RIVOLTO
+                if d == 0 and (a.fondamentale, a.qualita) != (prec.fondamentale, prec.qualita):
+                    c += _RIPETUTO
+                if m1 is not None and m0 is not None and d != 0 and m1 != m0 \
+                        and (d > 0) != (m1 > m0):
+                    c -= _CONTRARIO
+                if migliore is None or c < migliore:
+                    migliore, origine = c, bp
+            riga[b], prov[b] = migliore, origine
+        costi.append(riga)
+        da.append(prov)
+
+    b = min(costi[-1], key=lambda x: costi[-1][x])
+    bassi = [b]
+    for i in range(len(accordi) - 1, 0, -1):
+        b = da[i][b]
+        bassi.append(b)
+    bassi.reverse()
+    return [Accordo(inizio=a.inizio, durata=a.durata, fondamentale=a.fondamentale,
+                    qualita=a.qualita, confidenza=a.confidenza,
+                    basso=None if b == a.fondamentale else b)
+            for a, b in zip(accordi, bassi)]

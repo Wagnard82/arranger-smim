@@ -4300,6 +4300,26 @@ def test_armonizzazione_viterbi(inno_nudo, es):
     verifica(a[0].fondamentale == 0 and len(a) >= 16, "lead sheet con sigle: armonia del file")
 
 
+def test_rivolti():
+    """Il basso come linea (Piston P8): V6 fra due I quando la melodia scende
+    per grado; accordi di cadenza in stato fondamentale."""
+    from arranger import armonizzazione as A
+    from arranger.modello import Accordo
+    N = lambda m, t, d: Nota(midi=m, inizio=t, durata=d)
+    # I - V - I in mezzo alla frase, poi la cadenza V - I
+    acc = [Accordo(0, 2, 0, "maj"), Accordo(2, 2, 7, "maj"), Accordo(4, 2, 0, "maj"),
+           Accordo(6, 2, 7, "maj"), Accordo(8, 4, 0, "maj")]
+    mel = [N(76, 0, 2), N(74, 2, 2), N(72, 4, 2), N(74, 6, 2), N(72, 8, 4)]
+    fuori = A.scegli_bassi(acc, mel, A.Pesi())
+    verifica(fuori[1].basso == 11, f"V6 fra due I: {[a.basso for a in fuori]}")
+    verifica(fuori[-1].basso in (None, 0) and fuori[-2].basso in (None, 7),
+             f"cadenza finale in stato fondamentale: {[a.basso for a in fuori]}")
+    acc = [Accordo(0, 2, 0, "maj"), Accordo(2, 2, 7, "maj"), Accordo(4, 4, 0, "maj")]
+    mel = [N(64, 0, 2), N(67, 2, 2), N(72, 4, 4)]
+    fuori = A.scegli_bassi(acc, mel, A.Pesi())
+    verifica(fuori[-2].basso in (None, 7), "V di cadenza in stato fondamentale")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4339,6 +4359,7 @@ if __name__ == "__main__":
     test_griglia_e_tonalita(inno_nudo, es_arm)
     test_candidati_e_punteggio()
     test_armonizzazione_viterbi(inno_nudo, es_arm)
+    test_rivolti()
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)
