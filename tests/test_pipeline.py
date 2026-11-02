@@ -2948,9 +2948,13 @@ def test_melodia_nuda_armonizzata():
     verifica(giusti / totali >= 0.75,
              f"armonizzazione della melodia nuda troppo lontana dalle sigle "
              f"vere: {100 * giusti / totali:.0f}%")
-    verifica(len(a.armonia) <= len(sp.misure),
+    # dalla specifica del 2/11/2026 il ritmo armonico arriva a mezza misura
+    # in 4/4 (nel pop l'accordo cambia ogni due movimenti): al massimo un
+    # accordo per tratto della griglia, oltre e' rumore
+    from arranger.armonizzazione import griglia
+    verifica(len(a.armonia) <= len(griglia(sp)),
              "una melodia nuda si armonizza al massimo con un accordo per "
-             "misura: di piu' e' rumore")
+             "tratto della griglia: di piu' e' rumore")
     verifica(a.basso and not any(
         (round(n.inizio, 3), n.midi) in {(round(m.inizio, 3), m.midi)
                                          for m in a.melodia} for n in a.basso),
@@ -4226,6 +4230,76 @@ def test_candidati_e_punteggio():
              "nota di passaggio meno penalizzata di un'estranea sul battere")
 
 
+def test_armonizzazione_viterbi(inno_nudo, es):
+    """Ritmo armonico a mezza misura, cadenze, dominante secondaria, minore,
+    Inno senza sigle contro le sigle vere, casi limite."""
+    from arranger import armonizzazione as A
+    d = os.path.join(os.path.dirname(QUI), "esempi")
+    def armonia(percorso):
+        sp = ingestione.ingerisci(percorso)
+        return sp, A.armonizza(sp, analizzatore.analizza(sp).melodia)
+    def fondamentale_a(acc, t):
+        return next(a.fondamentale for a in acc if a.inizio - 1e-6 <= t < a.fine - 1e-6)
+    # I-V | vi-IV | I-V | I, arpeggi per mezza misura
+    ritmo = genera_esempi.melodia_nuda(os.path.join(d, "nuda_ritmo.xml"), "Ritmo", [
+        [(60, 0.5), (64, 0.5), (67, 1), (67, 0.5), (71, 0.5), (74, 1)],
+        [(69, 0.5), (72, 0.5), (76, 1), (65, 0.5), (69, 0.5), (72, 1)],
+        [(60, 0.5), (64, 0.5), (67, 1), (67, 0.5), (71, 0.5), (74, 1)],
+        [(72, 4)]])
+    sp, acc = armonia(ritmo)
+    attese = [0, 7, 9, 5, 0, 7, 0, 0]
+    giusti = sum(fondamentale_a(acc, 2.0 * k) == f for k, f in enumerate(attese))
+    verifica(giusti >= 6, f"ritmo armonico a mezza misura: {giusti}/8 "
+             f"{[(a.inizio, a.fondamentale) for a in acc]}")
+    verifica(len(acc) >= 6, f"almeno 6 accordi: {len(acc)}")
+    # cadenze
+    _sp, acc = armonia(es["do_maggiore"])
+    verifica([a.fondamentale for a in acc[-2:]] == [7, 0],
+             f"chiusura sulla tonica: V-I {[(a.inizio, a.fondamentale) for a in acc]}")
+    sospesa = genera_esempi.melodia_nuda(os.path.join(d, "nuda_sospesa.xml"), "Sospesa",
+        [[(64, 1), (65, 1), (67, 2)], [(69, 1), (67, 1), (65, 1), (64, 1)],
+         [(65, 1), (64, 1), (62, 2)], [(62, 4)]])
+    _sp, acc = armonia(sospesa)
+    verifica(acc[-1].fondamentale == 7, f"chiusura sul 2o grado: V ({acc[-1]})")
+    # dominante secondaria
+    vv = genera_esempi.melodia_nuda(os.path.join(d, "nuda_vv.xml"), "V del V",
+        [[(64, 2), (60, 2)], [(69, 2), (66, 2)], [(67, 4)], [(71, 2), (74, 2)], [(72, 4)]])
+    _sp, acc = armonia(vv)
+    verifica(any(a.fondamentale == 2 and a.qualita in ("maj", "dom7") for a in acc),
+             f"Fa# che sale a Sol: V/V proposto ({[(a.fondamentale, a.qualita) for a in acc]})")
+    # minore
+    _sp, acc = armonia(es["la_minore"])
+    verifica(acc[-1].fondamentale == 9 and acc[-1].qualita == "min",
+             f"La minore chiude su La- ({acc[-1]})")
+    verifica(any(a.fondamentale == 4 and a.qualita in ("maj", "dom7") for a in acc),
+             "La minore: dominante maggiore (Mi)")
+    # Inno senza sigle contro le sigle vere del lead sheet di prova
+    vero = ingestione.ingerisci(genera_esempi.lead_sheet(os.path.join(d, "lead_sheet.xml")))
+    _sp, acc = armonia(inno_nudo)
+    vere = sorted(vero.sigle)
+    def vera_a(t):
+        return [s for s in vere if s[0] <= t + 1e-6][-1][1]
+    mov = [x * 1.0 for x in range(int(vero.durata_totale))]
+    pct = sum(fondamentale_a(acc, t) == vera_a(t) for t in mov) / len(mov)
+    verifica(pct >= 0.84, f"Inno senza sigle: {pct:.0%} (minimo 84%)")
+    # punti di revisione
+    _sp, acc = armonia(es["valzer"])
+    verifica(len(acc) <= 3, "valzer: al massimo un accordo per misura")
+    _sp, acc = armonia(es["levare"])
+    verifica(fondamentale_a(acc, 1.0) == 0, "levare: primo accordo pieno sulla tonica")
+    pausa = genera_esempi.melodia_nuda(os.path.join(d, "nuda_pausa.xml"), "Pausa",
+        [[(None, 4)], [(None, 4)], [(64, 2), (67, 2)], [(72, 4)]])
+    _sp, acc = armonia(pausa)
+    verifica(acc[0].fondamentale == 0 and acc[0].fine >= 8.0 - 1e-6,
+             f"introduzione senza melodia: tonica tenuta ({acc[:2]})")
+    corta = genera_esempi.melodia_nuda(os.path.join(d, "nuda_corta.xml"), "Corta", [[(60, 4)]])
+    _sp, acc = armonia(corta)
+    verifica(len(acc) >= 1, "una nota sola: almeno un accordo")
+    # le sigle scritte vincono ancora
+    a = analizzatore.analizza(vero).armonia
+    verifica(a[0].fondamentale == 0 and len(a) >= 16, "lead sheet con sigle: armonia del file")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4264,6 +4338,7 @@ if __name__ == "__main__":
     es_arm = prepara_armonia()
     test_griglia_e_tonalita(inno_nudo, es_arm)
     test_candidati_e_punteggio()
+    test_armonizzazione_viterbi(inno_nudo, es_arm)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

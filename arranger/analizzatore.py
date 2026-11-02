@@ -592,95 +592,26 @@ def _ritaglia(accordi: List[Accordo], t0: float, t1: float) -> List[Accordo]:
     return fuori
 
 
-# Gradi fra cui sceglie l'armonizzazione di una melodia nuda, con la loro
-# preferenza a priori: I, V e IV reggono quasi tutto il repertorio scolastico,
-# gli accordi minori servono a non forzare le melodie che li chiedono.
-GRADI_ARMONIZZAZIONE = (
-    (0, "maj", 0.30), (7, "maj", 0.25), (5, "maj", 0.20), (7, "dom7", 0.15),
-    (9, "min", 0.10), (2, "min", 0.08), (4, "min", 0.00),
-)
-
-
 def armonizza_melodia(sp: Spartito, melodia: List[Nota],
                       penale_cambio: float = 0.35) -> List[Accordo]:
     """
     Propone un'armonia per una melodia che non ne ha: un lead sheet senza
-    sigle, cioe' una linea sola.
+    sigle, cioe' una linea sola. Il lavoro lo fa `armonizzazione.armonizza`
+    (Piston: tonalita', ritmo armonico, tavola delle successioni, cadenze,
+    dominanti secondarie, rivolti).
 
-    PERCHE' NON `rileva_armonia`. Quella e' pensata per accordi SCRITTI, e
-    tratta ogni nota presente come nota dell'accordo. Su una linea sola ogni
-    nota diventa la sua triade: sull'Inno alla gioia dava Mim-Fa-Sol-Fa-Mim-
-    Rem con quaranta cambi d'accordo in sedici battute, e azzeccava la
-    fondamentale delle sigle vere solo nel 30% dei movimenti.
+    Fino alla 0.9.7 qui c'era un accordo per misura fra I, IV e V con una
+    penalita' unica per ogni cambio: sui brani pop indovinava fra il 22% e
+    il 51% delle fondamentali (Let It Be: un solo accordo per tutto il
+    brano), perche' nel pop l'accordo cambia ogni due movimenti.
+    `penale_cambio` resta nella firma per compatibilita' ed e' ignorato.
 
-    Qui si ragiona come un arrangiatore che armonizza a orecchio: un accordo
-    per misura, scelto fra i gradi principali della tonalita' dell'armatura;
-    vince quello che contiene piu' note della melodia, pesate per durata e
-    con piu' peso a quelle sul battere; una preferenza a priori per I, V e
-    IV; e una penalita' per ogni cambio, risolta su tutto il brano insieme
-    (Viterbi), perche' il ritmo armonico regga. La tonica sull'ultimo accordo
-    si favorisce solo se la melodia chiude davvero sulla tonica: una frase
-    che si ferma sul quinto grado chiede una semicadenza, non una cadenza.
-
-    QUANTO CI SI PUO' FIDARE, misurato. Sull'Inno alla gioia la fondamentale
-    giusta nell'84% dei movimenti. Su una melodia breve di due note per
-    misura (Do-Re | Do-La | Fa-Sol | Sol, armonizzata dall'autore Do-Lam-Fa-
-    Sol) solo il 25%: proponeva Fa-Fa-Sol7-Sol, che e' un'armonizzazione
-    corretta della stessa melodia, ma non quella del brano. Dalla sola
-    melodia non si ricostruisce l'armonia DEL BRANO: se ne propone UNA,
-    plausibile. Per un arrangiamento fedele servono le sigle, ed e' per
-    questo che il report lo dichiara.
+    Dalla sola melodia non si ricostruisce l'armonia DEL BRANO: se ne
+    propone UNA, plausibile. Per un arrangiamento fedele servono le sigle,
+    ed e' per questo che il report lo dichiara.
     """
-    if not sp.misure or not melodia:
-        return []
-    tonica = (sp.misure[0].tonalita * 7) % 12
-    candidati = [((tonica + s) % 12, q, priore)
-                 for s, q, priore in GRADI_ARMONIZZAZIONE]
-    classi = [set(Accordo(inizio=0, durata=1, fondamentale=r,
-                          qualita=q).note_accordo())
-              for r, q, _p in candidati]
-
-    punteggi: List[List[float]] = []
-    for m in sp.misure:
-        a, b = m.inizio, m.fine
-        dentro = [n for n in melodia if n.inizio < b - 1e-6 and n.fine > a + 1e-6]
-        riga = []
-        for (r, q, priore), note_acc in zip(candidati, classi):
-            s = priore
-            for n in dentro:
-                durata = min(n.fine, b) - max(n.inizio, a)
-                peso = durata * (1.5 if abs(n.inizio - a) < 1e-6 else 1.0)
-                s += peso * (1.0 if n.midi % 12 in note_acc else -0.6)
-            riga.append(s)
-        punteggi.append(riga)
-
-    k = len(candidati)
-    migliori = [punteggi[0][:]]
-    provenienza: List[List[int]] = [[0] * k]
-    for i in range(1, len(punteggi)):
-        riga, da = [], []
-        for c in range(k):
-            valore, j = max((migliori[-1][p] - (penale_cambio if p != c else 0.0), p)
-                            for p in range(k))
-            riga.append(valore + punteggi[i][c])
-            da.append(j)
-        migliori.append(riga)
-        provenienza.append(da)
-
-    ultima = migliori[-1][:]
-    if max(melodia, key=lambda n: n.fine).midi % 12 == tonica:
-        ultima[0] += 1.0
-    c = max(range(k), key=lambda x: ultima[x])
-    scelte = [c]
-    for i in range(len(punteggi) - 1, 0, -1):
-        c = provenienza[i][c]
-        scelte.append(c)
-    scelte.reverse()
-
-    return [Accordo(inizio=m.inizio, durata=m.durata,
-                    fondamentale=candidati[c][0], qualita=candidati[c][1],
-                    confidenza=0.5)
-            for m, c in zip(sp.misure, scelte)]
+    from .armonizzazione import armonizza
+    return armonizza(sp, melodia)
 
 
 def rileva_armonia(sp: Spartito, per_movimento: bool = True) -> List[Accordo]:
