@@ -470,7 +470,16 @@ def armonizza(sp: Spartito, melodia: List[Nota],
     per_misura = max(1, round(len(tratti) / max(1, len(sp.misure))))
     lungo, lunghissimo = 2 * per_misura, 4 * per_misura
     R = lunghissimo + 2
-    muove = [any(t.inizio - 1e-6 <= n.inizio < t.fine - 1e-6 for n in note) for t in tratti]
+    # la melodia "si muove" in un tratto se la sua misura ha almeno un
+    # attacco: con una melodia rada (Let It Be) contare per tratto lasciava
+    # l'accordo fermo per 15 misure
+    def misura_di(t: Tratto):
+        return next((m for m in sp.misure if m.inizio - 1e-6 <= t.inizio < m.fine - 1e-6), None)
+    muove = []
+    for t in tratti:
+        m = misura_di(t)
+        a, b = (m.inizio, m.fine) if m else (t.inizio, t.fine)
+        muove.append(any(a - 1e-6 <= n.inizio < b - 1e-6 for n in note))
     meno = float("-inf")
     punti = [[meno] * R for _ in range(k_c)]
     for j in range(k_c):
@@ -535,6 +544,7 @@ def armonizza(sp: Spartito, melodia: List[Nota],
                                fondamentale=c.fondamentale, qualita=c.qualita,
                                confidenza=0.5))
     accordi = uniforma_ripetizioni(accordi, note, sp.misure)
+    accordi = riempi_vuoti(accordi, note, sp.misure)
     return scegli_bassi(accordi, note, pesi)
 
 
@@ -560,17 +570,6 @@ def uniforma_ripetizioni(accordi: List[Accordo], melodia: List[Nota],
         return tuple((round(n.inizio - a, 3), n.midi, round(n.durata, 3))
                      for n in note if a - 1e-6 <= n.inizio < b - 1e-6)
 
-    def taglia(lista: List[Accordo], a: float, b: float) -> List[Accordo]:
-        """Gli accordi dentro [a, b), ritagliati ai bordi."""
-        fuori = []
-        for x in lista:
-            i, f = max(x.inizio, a), min(x.fine, b)
-            if f > i + 1e-6:
-                fuori.append(Accordo(inizio=i, durata=f - i, fondamentale=x.fondamentale,
-                                     qualita=x.qualita, basso=x.basso,
-                                     confidenza=x.confidenza))
-        return fuori
-
     risultato = list(accordi)
     viste: Dict[tuple, int] = {}
     ultima = len(misure) - ampiezza
@@ -586,16 +585,75 @@ def uniforma_ripetizioni(accordi: List[Accordo], melodia: List[Nota],
             copia = [Accordo(inizio=x.inizio - a0 + a1, durata=x.durata,
                              fondamentale=x.fondamentale, qualita=x.qualita,
                              confidenza=x.confidenza)
-                     for x in taglia(risultato, a0, b0)]
-            risultato = taglia(risultato, float("-inf"), a1) + copia \
-                + taglia(risultato, b1, float("inf"))
+                     for x in _taglia(risultato, a0, b0)]
+            risultato = _taglia(risultato, float("-inf"), a1) + copia \
+                + _taglia(risultato, b1, float("inf"))
             i += ampiezza
             continue
         viste.setdefault(f, i)
         i += 1
-    # accordi uguali consecutivi si fondono
+    return _fondi(risultato)
+
+
+def riempi_vuoti(accordi: List[Accordo], melodia: List[Nota],
+                 misure: List[Misura], minimo: int = 3) -> List[Accordo]:
+    """
+    Introduzioni e intermezzi senza melodia (almeno `minimo` misure senza
+    attacchi) prendono gli accordi delle misure con melodia accanto, come
+    in un brano vero: l'introduzione quelli della strofa che segue, un
+    intermezzo o una coda quelli della frase prima. Un accordo tenuto per
+    otto misure vuote non sta in piedi.
+    """
+    if not accordi or len(misure) < 2 * minimo:
+        return accordi
+    vuote = [not any(m.inizio - 1e-6 <= n.inizio < m.fine - 1e-6 for n in melodia)
+             for m in misure]
+    risultato = list(accordi)
+    i = 0
+    while i < len(misure):
+        if not vuote[i]:
+            i += 1
+            continue
+        j = i
+        while j < len(misure) and vuote[j]:
+            j += 1
+        lunghezza = j - i
+        if lunghezza >= minimo:
+            if i == 0:                                   # introduzione
+                sorgente = list(range(j, min(len(misure), j + lunghezza)))
+            else:                                        # intermezzo o coda
+                sorgente = list(range(max(0, i - lunghezza), i))
+            if sorgente:
+                copia: List[Accordo] = []
+                for k, mis in enumerate(range(i, j)):
+                    src = misure[sorgente[k % len(sorgente)]]
+                    dst = misure[mis]
+                    for x in _taglia(risultato, src.inizio, src.fine):
+                        copia.append(Accordo(inizio=x.inizio - src.inizio + dst.inizio,
+                                             durata=x.durata, fondamentale=x.fondamentale,
+                                             qualita=x.qualita, confidenza=x.confidenza))
+                risultato = _taglia(risultato, float("-inf"), misure[i].inizio) + copia \
+                    + _taglia(risultato, misure[j - 1].fine, float("inf"))
+        i = j
+    return _fondi(risultato)
+
+
+def _taglia(lista: List[Accordo], a: float, b: float) -> List[Accordo]:
+    """Gli accordi dentro [a, b), ritagliati ai bordi."""
+    fuori = []
+    for x in lista:
+        i, f = max(x.inizio, a), min(x.fine, b)
+        if f > i + 1e-6:
+            fuori.append(Accordo(inizio=i, durata=f - i, fondamentale=x.fondamentale,
+                                 qualita=x.qualita, basso=x.basso,
+                                 confidenza=x.confidenza))
+    return fuori
+
+
+def _fondi(lista: List[Accordo]) -> List[Accordo]:
+    """Accordi uguali consecutivi diventano uno."""
     fusi: List[Accordo] = []
-    for x in risultato:
+    for x in lista:
         if fusi and (fusi[-1].fondamentale, fusi[-1].qualita) == (x.fondamentale, x.qualita) \
                 and abs(fusi[-1].fine - x.inizio) < 1e-6:
             fusi[-1].durata = x.fine - fusi[-1].inizio

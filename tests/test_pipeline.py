@@ -4441,6 +4441,26 @@ def test_armonia_pop_modale():
              f"I-bVII-IV: proposto il Sib ({[(a.inizio, a.fondamentale) for a in acc]})")
 
 
+def test_armonia_in_piedi_vuoti():
+    """Introduzioni e intermezzi senza melodia (3 misure o piu') prendono gli
+    accordi delle misure con melodia vicine, come in un brano vero."""
+    from arranger import armonizzazione as A
+    from arranger.modello import Accordo, Misura
+    N = lambda m, t, d: Nota(midi=m, inizio=t, durata=d)
+    misure = [Misura(i + 1, 4.0 * i, 4.0) for i in range(12)]
+    # 4 misure d'introduzione vuote, 4 di strofa, 2 vuote, 2 finali
+    mel = [N(64, 16 + 2 * k, 2) for k in range(8)] + [N(67, 40, 4), N(60, 44, 4)]
+    acc = [Accordo(0, 16, 0, "maj"), Accordo(16, 4, 0, "maj"), Accordo(20, 4, 9, "min"),
+           Accordo(24, 4, 5, "maj"), Accordo(28, 4, 7, "maj"), Accordo(32, 12, 0, "maj"),
+           Accordo(44, 4, 0, "maj")]
+    fuori = A.riempi_vuoti(acc, mel, misure)
+    intro = [(x.inizio, x.fondamentale) for x in fuori if x.inizio < 16 - 1e-6]
+    verifica(intro == [(0, 0), (4, 9), (8, 5), (12, 7)],
+             f"introduzione con gli accordi della strofa: {intro}")
+    vuoto = [(x.inizio, x.fondamentale) for x in fuori if 32 - 1e-6 <= x.inizio < 40 - 1e-6]
+    verifica(len(vuoto) == 1, f"due misure vuote non si toccano: {vuoto}")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4487,6 +4507,7 @@ if __name__ == "__main__":
     test_armonia_in_piedi_stasi()
     test_armonia_in_piedi_frasi_uguali()
     test_armonia_pop_modale()
+    test_armonia_in_piedi_vuoti()
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)
