@@ -296,6 +296,14 @@ TESTI: Dict[str, Dict[str, str]] = {
               "staffetta, un tono sotto.",
         "en": "E.g.: film-music mood, melody always on the violins, no relay, "
               "one tone lower."},
+    "tonalita_titolo": {"it": "🎯 Tonalità comoda per il tuo organico",
+                        "en": "🎯 A comfortable key for your ensemble"},
+    "tonalita_usa": {"it": "Usa questa tonalità", "en": "Use this key"},
+    "tonalita_lascia": {"it": "Lascia com'è scritto", "en": "Keep it as written"},
+    "tonalita_usata": {
+        "it": "Trasporto impostato: {semitoni:+d} semitoni. Lo puoi cambiare nelle impostazioni avanzate.",
+        "en": "Transposition set: {semitoni:+d} semitones. You can change it in the advanced settings.",
+    },
     "genera": {"it": "🎻 Genera arrangiamento", "en": "🎻 Generate arrangement"},
     "err_formazione": {"it": "Seleziona almeno uno strumento nella formazione.",
                        "en": "Select at least one instrument in the ensemble."},

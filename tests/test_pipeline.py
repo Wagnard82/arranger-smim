@@ -3240,6 +3240,9 @@ def test_interfaccia_completa():
         "livelli per strumento": "livelli_strumenti=livelli_strumenti",
         "esempio lead sheet": "genera_esempi.lead_sheet(",
         "spiegazione del lead sheet": "**lead sheet**",
+        "suggerimento della tonalita'": "tonalita.suggerisci_trasporto(",
+        "pulsante per usare la tonalita'": 'T("tonalita_usa")',
+        "pulsante per lasciarla com'e'": 'T("tonalita_lascia")',
     }
     for descrizione, frammento in attesi.items():
         verifica(frammento in testo,
@@ -4088,6 +4091,10 @@ def test_tonalita_comoda(inno):
         verifica(en.startswith("[Key]") and "Clarinet" in en and "6 sharps" in en
                  and "1 sharp" in en, f"testo EN: {en}")
         verifica("un semitono sopra" in it and "a semitone up" in en, "spostamento descritto")
+        breve = s.testo("it", interfaccia=True)
+        verifica("imposta il trasporto" not in breve and "Clarinetto" in breve
+                 and not breve.startswith("["),
+                 f"testo per l'interfaccia, senza istruzioni da report: {breve}")
 
     cfg = Configurazione(formazione={"flauto": 2, "violino": 2}, livello="2a Media")
     verifica(tonalita.suggerisci_trasporto(ingestione.ingerisci(inno), cfg) is None,

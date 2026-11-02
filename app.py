@@ -368,6 +368,40 @@ with st.sidebar:
 # MODULO 1 - Ingestione (solo MusicXML)
 # ==========================================================================
 
+def _sorgente(demo: str, caricato) -> "str | None":
+    """Il MusicXML da arrangiare: un esempio o il file caricato."""
+    if demo in ("pf", "ls"):
+        from esempi import genera_esempi
+        if demo == "pf":
+            return genera_esempi.inno_alla_gioia(
+                os.path.join(CARTELLA, "inno_alla_gioia.xml"))
+        return genera_esempi.lead_sheet(os.path.join(CARTELLA, "lead_sheet.xml"))
+    if caricato is not None:
+        percorso = os.path.join(CARTELLA, caricato.name)
+        with open(percorso, "wb") as f:
+            f.write(caricato.getbuffer())
+        return percorso
+    return None
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def _consiglio_tonalita(percorso: str, _modificato: float, attive: tuple,
+                        livello_: str, livelli: tuple, lingua: str):
+    """(semitoni, spiegazione) se un trasporto aiuta l'organico, se no None.
+    `_modificato` serve solo a rifare il calcolo se il file cambia."""
+    from arranger import ingestione, tonalita
+    try:
+        sp = ingestione.ingerisci(percorso)
+        cfg = Configurazione(formazione=dict(attive), livello=livello_,
+                             livelli_strumenti=dict(livelli), lingua=lingua)
+        consiglio = tonalita.suggerisci_trasporto(sp, cfg)
+    except Exception:
+        return None       # il file si controlla davvero alla generazione
+    if consiglio is None:
+        return None
+    return consiglio.semitoni, consiglio.testo(lingua, interfaccia=True)
+
+
 with PRINCIPALE:
     st.subheader(T("spartito_partenza"))
     st.info(T("spiega_ingresso"))
@@ -385,6 +419,32 @@ with PRINCIPALE:
                                      "ls": "esempio_ls"}[k]),
             help=T("esempio_aiuto"))
 
+    # Tonalita' piu' comoda per l'organico scelto: solo un suggerimento. Il
+    # docente la usa con un clic (imposta il trasporto) oppure la ignora, e
+    # il brano resta com'e' scritto.
+    sorgente_scelta = _sorgente(demo, caricato)
+    attive = {k: v for k, v in formazione.items() if v > 0}
+    if sorgente_scelta and attive and not trasporto:
+        consiglio = _consiglio_tonalita(
+            sorgente_scelta, os.path.getmtime(sorgente_scelta),
+            tuple(sorted(attive.items())), liv,
+            tuple(sorted(livelli_strumenti.items())), lng)
+        ignorato = st.session_state.get("_tonalita_ignorata") == sorgente_scelta
+        if consiglio and not ignorato:
+            semitoni_consigliati, spiegazione = consiglio
+            with st.container(border=True):
+                st.markdown(f"**{T('tonalita_titolo')}**")
+                st.write(spiegazione)
+                c_usa, c_lascia = st.columns(2)
+                c_usa.button(T("tonalita_usa"), on_click=_salva,
+                             args=("trasporto", semitoni_consigliati),
+                             use_container_width=True)
+                c_lascia.button(T("tonalita_lascia"), on_click=st.session_state.__setitem__,
+                                args=("_tonalita_ignorata", sorgente_scelta),
+                                use_container_width=True)
+    elif trasporto:
+        st.caption(T("tonalita_usata", semitoni=trasporto))
+
     richiesta_testo = st.text_area(T("richiesta_titolo"), height=90,
                                    placeholder=T("richiesta_esempio"),
                                    help=T("richiesta_aiuto"))
@@ -400,19 +460,8 @@ with PRINCIPALE:
             st.error(T("err_formazione"))
             st.stop()
 
-        if demo == "pf":
-            from esempi import genera_esempi
-            sorgente = genera_esempi.inno_alla_gioia(
-                os.path.join(CARTELLA, "inno_alla_gioia.xml"))
-        elif demo == "ls":
-            from esempi import genera_esempi
-            sorgente = genera_esempi.lead_sheet(
-                os.path.join(CARTELLA, "lead_sheet.xml"))
-        elif caricato is not None:
-            sorgente = os.path.join(CARTELLA, caricato.name)
-            with open(sorgente, "wb") as f:
-                f.write(caricato.getbuffer())
-        else:
+        sorgente = sorgente_scelta
+        if sorgente is None:
             st.error(T("err_sorgente"))
             st.stop()
 

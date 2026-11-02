@@ -543,6 +543,10 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
         "it": "[Tonalità] Più comoda per questo organico: {spostamento} (armatura da {da} a {a}). Per usarla imposta il trasporto; se no, il brano resta com'è scritto.",
         "en": "[Key] More comfortable for this ensemble: {spostamento} (key signature from {da} to {a}). To use it, set the transposition; otherwise the piece stays as written.",
     },
+    "tonalita_suggerita_ui": {
+        "it": "Più comoda per questo organico: {spostamento} (armatura da {da} a {a}).",
+        "en": "More comfortable for this ensemble: {spostamento} (key signature from {da} to {a}).",
+    },
     "tonalita_parte": {
         "it": "{strumento}: da {da} a {a}.",
         "en": "{strumento}: from {da} to {a}.",

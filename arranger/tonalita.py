@@ -55,10 +55,12 @@ class Suggerimento:
     melodia_dopo: int = 0
     leggii_melodia: int = 0
 
-    def testo(self, lingua: str = "it") -> str:
-        """La spiegazione per il docente, dai cataloghi."""
+    def testo(self, lingua: str = "it", interfaccia: bool = False) -> str:
+        """La spiegazione per il docente, dai cataloghi. Nel report porta il
+        prefisso e dice come usarla; nell'interfaccia c'e' il pulsante."""
         verso = "trasporto_su" if self.semitoni > 0 else "trasporto_giu"
-        righe = [t("tonalita_suggerita", lingua,
+        chiave = "tonalita_suggerita_ui" if interfaccia else "tonalita_suggerita"
+        righe = [t(chiave, lingua,
                    spostamento=t(verso, lingua,
                                  intervallo=t(f"intervallo_{abs(self.semitoni)}", lingua)),
                    da=_armatura(self.armatura_da, lingua),
