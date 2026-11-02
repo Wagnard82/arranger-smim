@@ -3631,7 +3631,7 @@ def prepara_ripresa(inno):
     d = os.path.join(os.path.dirname(QUI), "esempi")
     es = {"inno": inno}
     for nome in ("ritornello", "volte", "ds_al_coda", "dc_al_fine",
-                 "ritornello_levare"):
+                 "ritornello_levare", "volta_aperta"):
         es[nome] = getattr(genera_esempi, nome)(os.path.join(d, nome + ".xml"))
     es["volte_doppio"] = genera_esempi.volte(os.path.join(d, "volte_doppio.xml"),
                                              doppio=True)
@@ -3992,6 +3992,71 @@ def test_ripresa_dopo_le_volte(es):
     verifica("(volta #f) (volta \"2.\")" in ly, "fine della 1a volta e inizio della 2a insieme")
 
 
+def test_strutture_del_repertorio(es):
+    """Strutture trovate nei MusicXML veri (MuseScore 2.3 e 3.6): Let It Be,
+    Never Gonna Give You Up, Für Elise. Ricostruite qui con misure finte."""
+    from arranger import ripetizioni
+    from arranger.modello import SegniRipresa as S
+
+    def finte(segni):
+        ms = [Misura(i + 1, 4.0 * i, 4.0) for i in range(len(segni))]
+        for m, s in zip(ms, segni):
+            m.ripresa = s or S()
+        return ms
+    v1 = dict(volta_apre=True, volta_chiude="stop")
+
+    def numeri(ms):
+        return ripetizioni._intervalli([i + 1 for i in ripetizioni.ordine_esecuzione(ms)])
+
+    # Let It Be: |: m5 ... [1 m16 :|x3] [2 m17] m18 ... m33 :| [3 m34] ... m37
+    segni = [None] * 37
+    segni[4] = S(ritornello_inizio=True)
+    segni[15] = S(volte=(1,), ritornello_fine=3, **v1)
+    segni[16] = S(volte=(2,), volta_apre=True, volta_chiude="discontinue")
+    segni[32] = S(ritornello_fine=2)
+    segni[33] = S(volte=(3,), volta_apre=True, volta_chiude="discontinue")
+    ms = finte(segni)
+    verifica(numeri(ms) == "1-16, 5-15, 17-33, 5-15, 34-37", f"Let It Be: {numeri(ms)}")
+    msg = ripetizioni.controlla(ms, "it")
+    verifica(len(msg) == 1, f"Let It Be: nessun avviso, {msg}")
+
+    # Never Gonna Give You Up: volte (1)/(2,3) senza :| nella 1a, ripresa x3,
+    # D.S. al Coda che torna a prendere le volte (2,3)
+    segni = [None] * 54
+    segni[0] = S(ritornello_inizio=True)
+    segni[3] = S(volte=(1,), ritornello_fine=2, **v1)
+    segni[4] = S(volte=(2,), volta_apre=True, volta_chiude="discontinue")
+    segni[5] = S(ritornello_inizio=True, segno=True)
+    segni[8] = S(volte=(1,), **v1)
+    segni[9] = S(volte=(2, 3), **v1)
+    segni[25] = S(volte=(1,), ritornello_fine=3, **v1)
+    segni[26] = S(volte=(2, 3), volta_apre=True, volta_chiude="discontinue", al_coda=True)
+    segni[35] = S(ritornello_inizio=True)
+    segni[36] = S(volte=(1,), ritornello_fine=2, **v1)
+    segni[37] = S(volte=(2,), salto="ds", salto_verso="coda", **v1)
+    segni[38] = S(coda=True)
+    ms = finte(segni)
+    verifica(numeri(ms) == "1-4, 1-3, 5-9, 11-26, 6-8, 10-25, 27-37, 36, 38, 6-8, 10-25, 27, 39-54",
+             f"Never Gonna: {numeri(ms)}")
+    verifica(not any("volta fuori" in m for m in ripetizioni.controlla(ms, "it")),
+             "Never Gonna: le volte di m9 appartengono al ritornello di m26")
+
+    # nessuna volta per il 3o passaggio: si segnala
+    ms = finte([S(ritornello_inizio=True), S(volte=(1,), ritornello_fine=3, **v1),
+                S(volte=(2,), ritornello_fine=2, **v1), None])
+    verifica(numeri(ms) == "1-2, 1, 3, 1, 4", f"tre passaggi, due volte: {numeri(ms)}")
+    msg = ripetizioni.controlla(ms, "it")
+    verifica(any("mis. 2" in m and "3" in m and "passaggio" in m for m in msg),
+             f"volta mancante per il 3o passaggio: {msg}")
+
+    # Für Elise: la 2a volta mai chiusa nel file si chiude prima del |:
+    sp = ingestione.ingerisci(es["volta_aperta"])
+    r = [m.ripresa for m in sp.misure]
+    verifica(r[2].volte == (2,) and r[2].volta_chiude == "discontinue"
+             and not r[3].volte, f"volta aperta chiusa prima del |: {r[2]} {r[3]}")
+    verifica(numeri(sp.misure) == "1-2, 1, 3-5, 4-6", f"volta aperta: {numeri(sp.misure)}")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4022,6 +4087,7 @@ if __name__ == "__main__":
     test_midi_srotolato(es)
     test_segni_lilypond(es)
     test_ripresa_dopo_le_volte(es)
+    test_strutture_del_repertorio(es)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

@@ -905,6 +905,21 @@ def ritornello_levare(percorso):
                           quarti=[1, 4, 4, 3])
 
 
+def volta_aperta(percorso):
+    """
+    Come Für Elise esportata da MuseScore 3.6: la 2a volta di m3 si apre e
+    nel file non si chiude mai; a m4 comincia un altro ritornello. La volta
+    va chiusa alla fine di m3, altrimenti tutto il resto le appartiene.
+    """
+    segni = [{} for _ in range(6)]
+    segni[1] = {"barra_inizio": _stanghetta("left", volta="1", tipo_volta="start"),
+                "barra_fine": _stanghetta("right", "backward", "1", "stop")}
+    segni[2] = {"barra_inizio": _stanghetta("left", volta="2", tipo_volta="start")}
+    segni[3] = {"barra_inizio": _stanghetta("left", "forward")}
+    segni[4] = {"barra_fine": _stanghetta("right", "backward")}
+    return _brano_ripresa(percorso, "Volta aperta", segni)
+
+
 if __name__ == "__main__":
     qui = os.path.dirname(os.path.abspath(__file__))
     print(inno_alla_gioia(os.path.join(qui, "inno_alla_gioia.xml")))
@@ -931,3 +946,4 @@ if __name__ == "__main__":
     print(ds_al_coda(os.path.join(qui, "ds_al_coda.xml")))
     print(dc_al_fine(os.path.join(qui, "dc_al_fine.xml")))
     print(ritornello_levare(os.path.join(qui, "ritornello_levare.xml")))
+    print(volta_aperta(os.path.join(qui, "volta_aperta.xml")))

@@ -68,19 +68,52 @@ def _gruppi_volte(misure: List[Misura]) -> List[Optional[Tuple[int, int]]]:
     return gruppi
 
 
-def ordine_con_esito(misure: List[Misura]) -> Tuple[List[int], str]:
+def _strutture(misure: List[Misura]) -> List[Tuple[int, int]]:
     """
-    Indici delle misure nell'ordine in cui si suonano, e l'esito:
-    "" se tutto torna, "ciclo" o "destinazione" se i segni non sono
-    coerenti; in quei due casi l'ordine e' quello scritto.
+    Le strutture di ripresa: da un |: (o dall'inizio) fino al |: dopo
+    (escluso). Per ogni misura, i limiti della sua struttura.
+    """
+    n = len(misure)
+    inizi = [0] + [i for i, m in enumerate(misure) if m.ripresa.ritornello_inizio and i > 0]
+    limiti: List[Tuple[int, int]] = [(0, n)] * n
+    for k, a in enumerate(inizi):
+        b = inizi[k + 1] if k + 1 < len(inizi) else n
+        for i in range(a, b):
+            limiti[i] = (a, b)
+    return limiti
+
+
+def _ordina(misure: List[Misura]) -> Tuple[List[int], str, List[Tuple[str, int, int]]]:
+    """
+    L'ordine di esecuzione, l'esito ("", "ciclo", "destinazione") e le note
+    per il report: ("senza_inizio", misura del :|, misura d'arrivo) quando
+    un :| non torna a un |:, ("volta_mancante", misura, passaggio) quando
+    per un passaggio non c'e' la sua volta.
+
+    Regole, ricavate dai MusicXML veri (Let It Be, Never Gonna Give You
+    Up, Für Elise esportati da MuseScore):
+      * un :| torna al |: piu' vicino; se il ritornello prima e' gia'
+        finito, alla misura dopo; senza nessun |: nel brano, all'inizio;
+      * i passaggi si contano per struttura (dal |: al |: dopo): un
+        ritornello con le volte e' finito solo quando si esce dalle volte
+        all'ultimo passaggio previsto, cioe' al numero di volta piu' alto
+        della struttura (Let It Be: 1a e 2a volta, poi un :| e la 3a);
+      * se in un gruppo di volte manca quella del passaggio in corso, si
+        va avanti fino alla volta giusta, anche lontana; se non c'e', si
+        prosegue dopo il gruppo.
     """
     n = len(misure)
     lineare = list(range(n))
+    note: List[Tuple[str, int, int]] = []
     if not ha_segni(misure):
-        return lineare, ""
+        return lineare, "", note
     r_ = [m.ripresa for m in misure]
     ultima = _ultima_volta(misure)
-    # senza nessun |: ogni :| torna all'inizio del brano
+    gruppi = _gruppi_volte(misure)
+    strutture = _strutture(misure)
+    massima = {}
+    for a, b in set(strutture):
+        massima[a] = max((max(r_[k].volte) for k in range(a, b) if r_[k].volte), default=0)
     nessun_inizio = not any(r.ritornello_inizio for r in r_)
 
     ordine: List[int] = []
@@ -90,10 +123,11 @@ def ordine_con_esito(misure: List[Misura]) -> Tuple[List[int], str]:
     visitata = -1                 # ultima misura guardata, suonata o saltata
     while i < n:
         r = r_[i]
-        # uscendo in avanti da un gruppo di volte il ritornello e' finito:
-        # il :| sta nella 1a volta, che all'ultimo passaggio si salta
-        if (not dopo_salto and not r.volte and visitata >= 0
-                and i == visitata + 1 and r_[visitata].volte):
+        # uscendo in avanti dalle volte all'ultimo passaggio della
+        # struttura, il ritornello e' finito
+        if (not dopo_salto and not r.volte and visitata >= 0 and i == visitata + 1
+                and r_[visitata].volte
+                and passo >= massima[strutture[visitata][0]]):
             passo = 1
             if not nessun_inizio:
                 inizio_rit = i
@@ -103,17 +137,28 @@ def ordine_con_esito(misure: List[Misura]) -> Tuple[List[int], str]:
         if r.volte:
             volta = ultima[i] if dopo_salto else passo
             if volta not in r.volte:
+                a, b = gruppi[i]
+                nel_gruppo = any(volta in r_[k].volte for k in range(a, b))
+                if not nel_gruppo and not dopo_salto:
+                    fine_struttura = strutture[i][1]
+                    arrivo = next((k for k in range(b, fine_struttura)
+                                   if r_[k].volta_apre and volta in r_[k].volte), None)
+                    if arrivo is not None:
+                        i = arrivo
+                        continue
+                    if i == a:
+                        note.append(("volta_mancante", i, volta))
                 i += 1            # misura di un'altra volta: si salta
                 continue
         ordine.append(i)
         if len(ordine) > 4 * n:
-            return lineare, "ciclo"
+            return lineare, "ciclo", note
         if dopo_salto and r.fine:
             break
         if dopo_salto and r.al_coda:
             arrivo = next((k for k in range(indice_salto + 1, n) if r_[k].coda), None)
             if arrivo is None:
-                return lineare, "destinazione"
+                return lineare, "destinazione", note
             i = arrivo
             continue
         if not dopo_salto and r.ritornello_fine:
@@ -121,29 +166,43 @@ def ordine_con_esito(misure: List[Misura]) -> Tuple[List[int], str]:
             if fatte < r.ritornello_fine - 1:
                 eseguiti[i] = fatte + 1
                 passo += 1
+                if not r_[inizio_rit].ritornello_inizio and any(
+                        x.ritornello_fine for x in r_[:i]):
+                    note.append(("senza_inizio", i, inizio_rit))
                 i = inizio_rit
                 continue
-            passo = 1             # ritornello finito
-            if not nessun_inizio:
-                inizio_rit = i + 1
+            if not r.volte:       # ritornello senza volte finito
+                passo = 1
+                if not nessun_inizio:
+                    inizio_rit = i + 1
         if r.salto and i not in salti_fatti:
             salti_fatti.add(i)
             indice_salto = i
             if r.salto == "ds":
                 segni = [k for k in range(n) if r_[k].segno]
                 if not segni:
-                    return lineare, "destinazione"
+                    return lineare, "destinazione", note
                 prima = [k for k in segni if k <= i]
                 arrivo = prima[-1] if prima else segni[0]
             else:
                 arrivo = 0
             if r.salto_verso == "coda" and not any(r_[k].coda for k in range(i + 1, n)):
-                return lineare, "destinazione"
+                return lineare, "destinazione", note
             dopo_salto = True
             i = arrivo
             continue
         i += 1
-    return ordine, ""
+    return ordine, "", note
+
+
+def ordine_con_esito(misure: List[Misura]) -> Tuple[List[int], str]:
+    """
+    Indici delle misure nell'ordine in cui si suonano, e l'esito:
+    "" se tutto torna, "ciclo" o "destinazione" se i segni non sono
+    coerenti; in quei due casi l'ordine e' quello scritto.
+    """
+    ordine, esito, _note = _ordina(misure)
+    return ordine, esito
 
 
 def ordine_esecuzione(misure: List[Misura]) -> List[int]:
@@ -193,41 +252,16 @@ def controlla(misure: List[Misura], lingua: str) -> List[str]:
     num = [m.numero for m in misure]
     avvisi: List[str] = []
 
-    # volte senza un :| che le chiuda
-    i = 0
-    while i < n:
-        if not r_[i].volte:
-            i += 1
-            continue
-        j = i
-        while j < n and r_[j].volte:
-            j += 1
-        if not any(r_[k].ritornello_fine for k in range(i, j)):
-            avvisi.append(t("ripresa_volta_fuori", lingua, mis=num[i]))
-        i = j
-    # :| dopo un altro :| senza un |: in mezzo (non conta il :| di un'altra
-    # volta dello stesso gruppo): si riprende dalla misura dopo il :|
-    # precedente, o dopo il suo gruppo di volte; senza nessun |: nel brano,
-    # dall'inizio. E' la regola di `ordine_con_esito`.
-    gruppo = _gruppi_volte(misure)
-    nessun_inizio = not any(r.ritornello_inizio for r in r_)
-    ultimo_fine = -1
-    for i, r in enumerate(r_):
-        if r.ritornello_inizio:
-            ultimo_fine = -1
-        if not r.ritornello_fine:
-            continue
-        stesso_gruppo = gruppo[i] is not None and gruppo[i] == gruppo[ultimo_fine]
-        if ultimo_fine >= 0 and not stesso_gruppo:
-            if nessun_inizio:
-                da = 0
-            elif gruppo[ultimo_fine] is not None:
-                da = gruppo[ultimo_fine][1]
-            else:
-                da = ultimo_fine + 1
-            avvisi.append(t("ripresa_senza_inizio", lingua, mis=num[i],
-                            da=num[min(da, n - 1)]))
-        ultimo_fine = i
+    # volte senza nessun :| in tutta la loro struttura (dal |: al |: dopo):
+    # l'ultima volta non ha il :|, e nemmeno una volta che ne precede
+    # un'altra con il :| piu' avanti (Never Gonna Give You Up, m9)
+    strutture = _strutture(misure)
+    gruppi = _gruppi_volte(misure)
+    for i in range(n):
+        if r_[i].volte and gruppi[i][0] == i:
+            a, b = strutture[i]
+            if not any(r_[k].ritornello_fine for k in range(a, b)):
+                avvisi.append(t("ripresa_volta_fuori", lingua, mis=num[i]))
     # salti senza destinazione
     for i, r in enumerate(r_):
         if r.salto == "ds" and not any(x.segno for x in r_):
@@ -238,7 +272,12 @@ def controlla(misure: List[Misura], lingua: str) -> List[str]:
         if r.salto and r.salto_verso == "fine" and not any(x.fine for x in r_):
             avvisi.append(t("ripresa_fine_mancante", lingua, mis=num[i]))
 
-    ordine, esito = ordine_con_esito(misure)
+    ordine, esito, note = _ordina(misure)
+    for tipo, i, x in note:
+        if tipo == "senza_inizio":
+            avvisi.append(t("ripresa_senza_inizio", lingua, mis=num[i], da=num[x]))
+        elif tipo == "volta_mancante":
+            avvisi.append(t("ripresa_volta_mancante", lingua, mis=num[i], n=x))
     if esito:
         return avvisi + [t("ripresa_lineare", lingua)]
     righe = [t("ripresa_forma", lingua, misure=_intervalli([num[i] for i in ordine]))]

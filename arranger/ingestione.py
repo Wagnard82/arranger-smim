@@ -362,8 +362,23 @@ def _segni_ripresa(parti: List[ET.Element]) -> Dict[int, SegniRipresa]:
     segni: Dict[int, SegniRipresa] = {}
     for parte in parti:
         volte_aperte: Tuple[int, ...] = ()
+        per_parte: Dict[int, SegniRipresa] = {}
         for m_idx, mis in enumerate(parte.findall("./{*}measure")):
             s = SegniRipresa()
+            # una volta rimasta aperta nel file (MuseScore 3.6, Für Elise) si
+            # chiude alla misura prima di un nuovo |: o di un'altra volta
+            barre_sx = [b for b in mis.findall("./{*}barline")
+                        if b.get("location") == "left"]
+            apre = any(b.find("./{*}repeat") is not None
+                       and b.find("./{*}repeat").get("direction") == "forward"
+                       or b.find("./{*}ending") is not None
+                       and b.find("./{*}ending").get("type") == "start"
+                       for b in barre_sx)
+            prec = per_parte.get(m_idx - 1)
+            if apre and volte_aperte and prec is not None and prec.volte \
+                    and not prec.volta_chiude:
+                prec.volta_chiude = "discontinue"
+                volte_aperte = ()
             for barra in mis.findall("./{*}barline"):
                 lato = barra.get("location", "right")
                 rip = barra.find("./{*}repeat")
@@ -399,8 +414,9 @@ def _segni_ripresa(parti: List[ET.Element]) -> Dict[int, SegniRipresa]:
                     _leggi_testo_ripresa(el.text, s)
                 elif tag == "sound":
                     _leggi_suono_ripresa(el, s)
-            if s.vuoti:
-                continue
+            if not s.vuoti:
+                per_parte[m_idx] = s
+        for m_idx, s in per_parte.items():
             if m_idx in segni:
                 _unisci_segni(segni[m_idx], s)
             else:

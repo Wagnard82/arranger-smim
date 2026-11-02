@@ -514,6 +514,10 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
         "it": "[Forma] mis. {mis}: ritornello senza segno d'inizio dopo un altro ritornello: si riprende da mis. {da}.",
         "en": "[Form] bar {mis}: repeat with no start sign after another repeat: it goes back to bar {da}.",
     },
+    "ripresa_volta_mancante": {
+        "it": "[Forma] mis. {mis}: nessuna volta per il passaggio {n}, si prosegue dopo le volte.",
+        "en": "[Form] bar {mis}: no ending for pass {n}, playback continues after the endings.",
+    },
     "ripresa_ds_senza_segno": {
         "it": "[Forma] mis. {mis}: D.S. senza Segno.",
         "en": "[Form] bar {mis}: D.S. without a Segno.",
