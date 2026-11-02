@@ -4120,6 +4120,32 @@ def test_tonalita_comoda(inno):
              "trasporto scelto dal docente: nessun suggerimento")
 
 
+def test_server_tonalita(inno):
+    """L'endpoint /api/tonalita della nuova interfaccia: chiede l'accesso,
+    restituisce il suggerimento o null, non trasporta niente."""
+    import base64
+    os.environ.setdefault("SCORECRAFT_SENZA_MAIL", "1")
+    import server
+    verifica(server.API.get("/api/tonalita") is server.api_tonalita,
+             "server: /api/tonalita registrato")
+    try:
+        server.api_tonalita({"esempio": "pf", "formazione": {"sax": 2}}, None, {})
+        verifica(False, "server: /api/tonalita senza accesso")
+    except server.ErroreRichiesta as e:
+        verifica(e.codice == "accesso_richiesto", f"server: accesso richiesto ({e.codice})")
+    out = server.api_tonalita({"esempio": "pf", "formazione": {"sax": 2}, "livello": 0},
+                              "docente@scuola.it", {})
+    s = out.get("suggerimento")
+    verifica(s is not None and s["semitoni"] == 3 and "Sax" in s["testo"]
+             and not s["testo"].startswith("["), f"server: sax in Do -> Mib: {out}")
+    with open(inno, "rb") as f:
+        contenuto = base64.b64encode(f.read()).decode()
+    out = server.api_tonalita({"nome_file": "inno.xml", "contenuto": contenuto,
+                               "formazione": {"flauto": 2, "violino": 2}, "livello": 1,
+                               "lingua": "en"}, "docente@scuola.it", {})
+    verifica(out.get("suggerimento") is None, f"server: Do per flauti e violini, niente: {out}")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4152,6 +4178,7 @@ if __name__ == "__main__":
     test_ripresa_dopo_le_volte(es)
     test_strutture_del_repertorio(es)
     test_tonalita_comoda(inno)
+    test_server_tonalita(inno)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)
