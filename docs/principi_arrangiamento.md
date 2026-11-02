@@ -527,6 +527,123 @@ Confronto con il motore:
 
 ---
 
+## 5. Piston, *Armonia* (ed. italiana): armonizzazione di una melodia
+
+**Fonte:** W. Piston, *Armonia*, edizione italiana, PDF dell'autore (scansione
+leggibile), letto il 02/11/2026. Capitoli letti: 3 (tavola delle successioni
+abituali, pp. 21-22), 9 (armonizzazione di una melodia, pp. 135-148),
+11 (cadenze, pp. 167-175), 12 (ritmo armonico, pp. 183-192), 16 (dominanti
+secondarie, pp. 249-254). Affidabilità: **certo** per il testo; gli esempi
+sul pentagramma sono stati guardati solo per capire il testo.
+Il capitolo 13 (struttura armonica della frase) e il 4 (modo minore) non sono
+ancora stati letti.
+
+### 5.1 Principi, in sintesi
+
+1. **Armonizzare è scoprire, non inventare.** Quasi ogni melodia tonale nasce
+   da un'armonia, dichiarata o implicita: si cerca quella. Raramente c'è una
+   sola soluzione giusta; ce ne sono di migliori e di peggiori.
+2. **Prima la tonalità, dalla chiusura della frase.** La nota su cui finisce
+   la frase decide fra le tonalità possibili: se chiude con V-I (cadenza
+   autentica) o sul V (cadenza sospesa). Le note presenti e assenti nella
+   melodia escludono le tonalità che le contraddicono. Il modo minore va
+   considerato insieme al maggiore relativo.
+3. **Frequenza dei cambi.** Con le sole triadi viene spontaneo un accordo per
+   nota; due eccezioni rallentano il ritmo armonico:
+   - un **salto melodico** si armonizza di solito con un accordo solo per le
+     due note, salvo quando la prima cade su un movimento debole e la seconda
+     sul battere: lì è meglio cambiare;
+   - una **nota tenuta o legata** può restare nota comune di più accordi.
+4. **Cambiare armonia attraverso la stanghetta.** Il nuovo accordo sul primo
+   movimento della battuta rafforza il metro; tenere lo stesso accordo
+   attraverso la stanghetta indebolisce il battere.
+5. **Ogni nota della melodia ammette tre accordi** (ne è fondamentale, terza o
+   quinta): si elencano tutti, poi si scartano. Criteri di scarto: la cadenza
+   decisa per la frase, la varietà, evitare il VII in stato fondamentale,
+   evitare successioni deboli e collegamenti con ottave o quinte parallele.
+6. **Tavola delle successioni abituali (modo maggiore).**
+   - I va a IV o V, a volte VI, meno spesso II o III;
+   - II va a V, a volte IV o VI, meno spesso I o III;
+   - III va a VI, a volte IV, meno spesso I, II o V;
+   - IV va a V, a volte I o II, meno spesso III o VI;
+   - V va a I, a volte IV o VI, meno spesso II o III;
+   - VI va a II o V, a volte III o IV, meno spesso I;
+   - VII va a I o III, a volte VI, meno spesso II, IV o V.
+7. **Forza delle successioni** (dalla più forte):
+   - fondamentali per quarta o quinta: la più forte è V-I, e IV-I la
+     bilancia;
+   - per grado: forte in certi casi;
+   - per terza o sesta: debole.
+
+   A parità di altro:
+   - lo stato fondamentale è più forte del rivolto;
+   - I, IV, V (e a volte II) pesano più di III e VI;
+   - un accordo forte cade bene su un movimento forte; un accordo debole sul
+     battere suona come sostituto di uno più forte.
+8. **Il basso è una seconda melodia.** Con i primi rivolti si costruisce il
+   basso come linea, non come successione di fondamentali:
+   - si cerca il moto contrario rispetto alla melodia;
+   - si evita la tonica ripetuta e il troppo moto disgiunto;
+   - non più di tre seste parallele di fila fra melodia e basso.
+   
+   Gli intervalli fra melodia e basso dicono il rivolto: quinta → stato
+   fondamentale; sesta → primo rivolto; ottava o terza → l'uno o l'altro.
+9. **Formule («parole armoniche»).** Gruppi di due o tre accordi ricorrenti:
+   riconoscere nella melodia la voce superiore di una formula nota è più
+   rapido che armonizzare nota per nota.
+10. **Il carattere della melodia decide il ritmo armonico.**
+    - Melodia ritmica e motivica: un cambio per motivo o per battuta.
+    - Melodia lenta a valori costanti: spesso un accordo per nota.
+    - Ritmo armonico uguale a ogni battuta è tipico; troppi cambi agitano,
+      troppo pochi rendono l'armonia statica.
+11. **Cadenze.**
+    - **Autentica** V-I, preparata da IV o II, eventualmente con la quarta e
+      sesta di cadenza (I⁶₄ prima del V); è **perfetta** con entrambi gli
+      accordi in stato fondamentale e la tonica in melodia, imperfetta
+      altrimenti.
+    - **Sospesa** (sul V, spesso preceduta da IV, II⁶, VI o dal V del V):
+      tipica della prima di due frasi parallele, la seconda chiude con
+      l'autentica.
+    - **Plagale** IV-I, spesso dopo un'autentica.
+    - **D'inganno** V-VI.
+    - Le cadenze possono cadere sul battere o in levare.
+12. **Dominanti secondarie.**
+    - Ogni grado può essere preceduto dalla propria dominante (triade
+      maggiore o settima di dominante) senza indebolire la tonalità, anzi
+      rafforzandola: V del V, V del II, V del IV, V del VI...
+    - Si riconoscono dalla nota alterata della melodia, che fa da sensibile
+      temporanea e sale; una nota abbassata scende.
+    - Si preparano bene con un accordo che appartiene anche alla tonalità
+      del grado tonicizzato (es. VI - V del V - V).
+    - Il V del V prima del V dà una cadenza sospesa molto forte.
+
+### 5.2 Confronto con il motore (02/11/2026)
+
+`armonizza_melodia` oggi sceglie un accordo per misura fra I, V, IV, V7, VI,
+II, III, con un Viterbi che penalizza i cambi; la tonica è dedotta solo
+dall'armatura, sempre come maggiore. Misura sul banco di prova (sigle tolte
+e confrontate movimento per movimento con la fondamentale vera):
+
+| Brano | Fondamentale giusta | Cambi veri | Cambi proposti |
+|---|---|---|---|
+| Inno alla gioia (lead sheet di prova) | 84% | 19 | 11 |
+| Let It Be | 46% | 69 | 1 |
+| All of Me (J. Legend) | 32% | 125 | 75 |
+| Easy On Me | 34% | 70 | 28 |
+| The Girl from Ipanema | 7% | 25 | 14 |
+
+Cosa manca rispetto a Piston:
+- il ritmo armonico a mezza misura, perché nel pop cambia ogni due movimenti
+  (Let It Be: un solo accordo per tutto il brano);
+- la tavola delle successioni come probabilità di passaggio, invece della
+  sola penalità di cambio;
+- le cadenze a fine frase;
+- il modo minore;
+- i rivolti e il basso come linea;
+- le dominanti secondarie suggerite dalle note alterate.
+
+---
+
 ## Fonti ancora da elaborare
 
 - Indicazioni nazionali per lo strumento musicale (Allegato A al DM
@@ -534,4 +651,6 @@ Confronto con il motore:
 - Griglie per gradi di altri editori ([Excelcia](https://excelciamusic.com/string-orchestra-releases/),
   [Kendor](https://kendormusic.com/string-orchestra-releases)), da
   confrontare con Alfred.
-- De La Motte, Piston: dalle scansioni dell'autore, un capitolo alla volta.
+- Piston: capitoli 4 (modo minore) e 13 (struttura armonica della frase).
+- De La Motte, *Manuale di armonia* (PDF dell'autore): armonia funzionale
+  (T-S-D), utile per un modello a funzioni; da leggere.
