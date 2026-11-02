@@ -242,3 +242,40 @@ def taglia_ai_confini(partitura: Partitura) -> int:
             nuovi.extend(pezzi)
         parte.eventi = nuovi
     return interrotte
+
+
+def srotola_eventi(eventi: List[Evento], misure: List[Misura]) -> List[Evento]:
+    """
+    Gli eventi di una parte al tempo di ESECUZIONE, misura per misura
+    nell'ordine in cui si suonano; le pause si lasciano fuori. Una nota
+    legata alla misura dopo resta una nota sola se quella misura si suona
+    davvero subito dopo. Serve al MIDI di anteprima.
+    """
+    from .esportatore import taglia_su_misura   # qui: import circolare
+    fuori: List[Evento] = []
+    aperti: Dict[Tuple[Tuple[int, ...], int], Evento] = {}
+    t = 0.0
+    precedente = -2
+    for i in ordine_esecuzione(misure):
+        m = misure[i]
+        if i != precedente + 1:
+            aperti = {}
+        ancora: Dict[Tuple[Tuple[int, ...], int], Evento] = {}
+        for frammento, legato_prima, legato_dopo in taglia_su_misura(eventi, m):
+            if frammento.pausa:
+                continue
+            chiave = (tuple(frammento.altezze), frammento.rigo)
+            if legato_prima and chiave in aperti \
+                    and abs(frammento.inizio - m.inizio) < 1e-6:
+                ev = aperti.pop(chiave)
+                ev.durata += frammento.durata
+            else:
+                ev = replace(frammento, inizio=frammento.inizio - m.inizio + t,
+                             altezze=list(frammento.altezze))
+                fuori.append(ev)
+            if legato_dopo:
+                ancora[chiave] = ev
+        aperti = ancora
+        precedente = i
+        t += m.durata
+    return fuori

@@ -3845,6 +3845,73 @@ def test_segni_nel_musicxml(es):
         verifica("<barline" not in f.read(), "inno senza stanghette")
 
 
+def _durata_midi(percorso):
+    """Ultimo tick di nota del file MIDI, in quarti (tpq 480)."""
+    import struct
+    with open(percorso, "rb") as f:
+        dati = f.read()
+    tpq = struct.unpack(">H", dati[12:14])[0]
+    pos, massimo = 14, 0
+    while pos < len(dati):
+        lung = struct.unpack(">I", dati[pos + 4:pos + 8])[0]
+        traccia, pos = dati[pos + 8:pos + 8 + lung], pos + 8 + lung
+        i, t = 0, 0
+        while i < len(traccia):
+            delta = 0
+            while True:
+                b = traccia[i]
+                i += 1
+                delta = (delta << 7) | (b & 0x7F)
+                if not b & 0x80:
+                    break
+            t += delta
+            if traccia[i] == 0xFF:
+                i += 3 + traccia[i + 2]
+            elif traccia[i] & 0xF0 == 0xC0:
+                i += 2
+            else:
+                if traccia[i] & 0xF0 == 0x80:
+                    massimo = max(massimo, t)
+                i += 3
+    return massimo / tpq
+
+
+def test_midi_srotolato(es):
+    """Il MIDI di anteprima suona la forma vera; senza segni non cambia."""
+    from arranger import ripetizioni
+    from arranger.modello import Evento
+    sp = ingestione.ingerisci(es["ritornello_levare"])
+    ev = [Evento(inizio=m.inizio, durata=m.durata, altezze=[60 + i])
+          for i, m in enumerate(sp.misure)]
+    fuori = ripetizioni.srotola_eventi(ev, sp.misure)
+    verifica(abs(max(e.fine for e in fuori) - 24.0) < 1e-6,
+             f"2 x 12 quarti: {max(e.fine for e in fuori)}")
+    verifica([e.altezze[0] for e in fuori] == [60, 61, 62, 63] * 2,
+             f"ordine delle note: {[e.altezze for e in fuori]}")
+    tenuta = [Evento(inizio=1.0, durata=8.0, altezze=[70])]   # m1-m2, nessun confine
+    verifica(len(ripetizioni.srotola_eventi(tenuta, sp.misure)) == 2,
+             "una nota per passaggio, non una per misura")
+
+    r = esegui(es["ds_al_coda"], Configurazione(formazione=ORGANICO_RIPRESA),
+               cartella=os.path.join(QUI, "_out"), nome_base="ds_midi")
+    verifica(abs(_durata_midi(r.percorso_midi) - 12 * 4.0) < 1e-6,
+             f"D.S. al Coda: 12 misure suonate, {_durata_midi(r.percorso_midi)} quarti")
+    cfg = Configurazione(formazione={"flauto": 1, "pianoforte": 1})
+    a = esegui(es["inno"], cfg, cartella=os.path.join(QUI, "_out"), nome_base="inno_a")
+    with open(a.percorso_midi, "rb") as f:
+        prima = f.read()
+    verifica(not ripetizioni.ha_segni(a.partitura.misure), "inno senza segni")
+    import arranger.ripetizioni as modulo
+    originale = modulo.srotola_eventi
+    modulo.srotola_eventi = lambda *a_, **k: (_ for _ in ()).throw(AssertionError("usata"))
+    try:
+        esportatore.esporta_midi(a.partitura, os.path.join(QUI, "_out", "inno_b.mid"))
+        with open(os.path.join(QUI, "_out", "inno_b.mid"), "rb") as f:
+            verifica(f.read() == prima, "inno: MIDI identico, srotolamento non usato")
+    finally:
+        modulo.srotola_eventi = originale
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -3872,6 +3939,7 @@ if __name__ == "__main__":
     test_controlli_ripresa(es)
     test_taglio_ai_confini(es)
     test_segni_nel_musicxml(es)
+    test_midi_srotolato(es)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

@@ -717,12 +717,18 @@ def esporta_midi(part: Partitura, percorso: str, tpq: int = 480) -> str:
     meta = b"\x00\xff\x51\x03" + usec.to_bytes(3, "big") + b"\x00\xff\x2f\x00"
     tracce.append(meta)
 
+    # con ritornelli e salti l'anteprima suona la forma vera, srotolata;
+    # senza segni il file resta quello di sempre
+    from . import ripetizioni
+    srotola = ripetizioni.ha_segni(part.misure)
     for i, p in enumerate(part.parti):
         st = strumento(p.strumento)
         canale = 9 if st.percussione else (i % 15) + (1 if i % 15 >= 9 else 0)
         canale = min(15, canale)
         eventi: List[Tuple[int, int, int, int]] = []  # (tick, tipo, nota, vel)
-        for e in p.eventi:
+        sorgente = (ripetizioni.srotola_eventi(p.eventi, part.misure)
+                    if srotola else p.eventi)
+        for e in sorgente:
             if e.pausa:
                 continue
             t0 = int(round(e.inizio * tpq))
