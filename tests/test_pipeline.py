@@ -4057,6 +4057,62 @@ def test_strutture_del_repertorio(es):
     verifica(numeri(sp.misure) == "1-2, 1, 3-5, 4-6", f"volta aperta: {numeri(sp.misure)}")
 
 
+# --------------------------------------------------------------------------
+# Tonalita' comoda per l'organico: solo un suggerimento
+# --------------------------------------------------------------------------
+
+
+def _inno_in(inno, semitoni):
+    from arranger.pipeline import trasporta
+    sp = ingestione.ingerisci(inno)
+    trasporta(sp, semitoni)
+    return sp
+
+
+def test_tonalita_comoda(inno):
+    """In Mi maggiore i clarinetti di 1a Media leggono 6 diesis: si suggerisce
+    Fa (un semitono sopra), dove leggono 1 diesis. In Do con flauti e violini
+    non si suggerisce niente. Il brano non viene toccato."""
+    from arranger import tonalita
+    sp = _inno_in(inno, 4)
+    prima = [(n.inizio, n.durata, n.midi) for n in sp.note]
+    cfg = Configurazione(formazione={"flauto": 1, "clarinetto": 2}, livello="1a Media")
+    s = tonalita.suggerisci_trasporto(sp, cfg)
+    verifica(s is not None and s.semitoni == 1, f"Mi -> Fa per i clarinetti: {s}")
+    verifica([(n.inizio, n.durata, n.midi) for n in sp.note] == prima,
+             "il suggerimento non trasporta niente")
+    if s is not None:
+        it, en = s.testo("it"), s.testo("en")
+        verifica(it.startswith("[Tonalità]") and "Clarinetto" in it and "6 diesis" in it
+                 and "1 diesis" in it, f"testo IT: {it}")
+        verifica(en.startswith("[Key]") and "Clarinet" in en and "6 sharps" in en
+                 and "1 sharp" in en, f"testo EN: {en}")
+        verifica("un semitono sopra" in it and "a semitone up" in en, "spostamento descritto")
+
+    cfg = Configurazione(formazione={"flauto": 2, "violino": 2}, livello="2a Media")
+    verifica(tonalita.suggerisci_trasporto(ingestione.ingerisci(inno), cfg) is None,
+             "Do con flauti e violini: nessun suggerimento")
+    # i livelli per strumento contano: clarinetti di 3a Media reggono Mi
+    cfg = Configurazione(formazione={"clarinetto": 2}, livello="1a Media",
+                         livelli_strumenti={"clarinetto": "3a Media"})
+    s3 = tonalita.suggerisci_trasporto(_inno_in(inno, 4), cfg)
+    verifica(s3 is None or abs(s3.semitoni) <= 2,
+             f"clarinetti di 3a Media: niente o un trasporto breve: {s3}")
+
+    # nel report solo se il docente non ha gia' scelto un trasporto
+    cfg = Configurazione(formazione={"flauto": 1, "clarinetto": 2, "pianoforte": 1},
+                         livello="1a Media")
+    r = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"), nome_base="tono",
+               spartito=_inno_in(inno, 4))
+    verifica(any(m.startswith("[Tonalità]") for m in r.report), "riga [Tonalità] nel report")
+    cfg = Configurazione(formazione={"flauto": 1, "clarinetto": 2, "pianoforte": 1},
+                         livello="1a Media", trasporto=-4)
+    r = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"), nome_base="tono2",
+               spartito=_inno_in(inno, 4))
+    verifica(not any(m.startswith("[Tonalità]") for m in r.report),
+             "trasporto scelto dal docente: nessun suggerimento")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4088,6 +4144,7 @@ if __name__ == "__main__":
     test_segni_lilypond(es)
     test_ripresa_dopo_le_volte(es)
     test_strutture_del_repertorio(es)
+    test_tonalita_comoda(inno)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

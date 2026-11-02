@@ -538,6 +538,32 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
         "it": "[Forma] {n} legature di valore dell'originale interrotte a un ritornello o a una volta: le altezze non cambiano.",
         "en": "[Form] {n} ties from the original broken at a repeat or an ending: the pitches do not change.",
     },
+    # ---- tonalita' comoda per l'organico
+    "tonalita_suggerita": {
+        "it": "[Tonalità] Più comoda per questo organico: {spostamento} (armatura da {da} a {a}). Per usarla imposta il trasporto; se no, il brano resta com'è scritto.",
+        "en": "[Key] More comfortable for this ensemble: {spostamento} (key signature from {da} to {a}). To use it, set the transposition; otherwise the piece stays as written.",
+    },
+    "tonalita_parte": {
+        "it": "{strumento}: da {da} a {a}.",
+        "en": "{strumento}: from {da} to {a}.",
+    },
+    "tonalita_melodia": {
+        "it": "La melodia entra nell'estensione di {dopo} leggii su {totale} (prima {prima}).",
+        "en": "The melody fits the range of {dopo} parts out of {totale} (before: {prima}).",
+    },
+    "trasporto_su": {"it": "{intervallo} sopra", "en": "{intervallo} up"},
+    "trasporto_giu": {"it": "{intervallo} sotto", "en": "{intervallo} down"},
+    "intervallo_1": {"it": "un semitono", "en": "a semitone"},
+    "intervallo_2": {"it": "un tono", "en": "a whole tone"},
+    "intervallo_3": {"it": "una terza minore", "en": "a minor third"},
+    "intervallo_4": {"it": "una terza maggiore", "en": "a major third"},
+    "intervallo_5": {"it": "una quarta", "en": "a fourth"},
+    "intervallo_6": {"it": "un tritono", "en": "a tritone"},
+    "armatura_nessuna": {"it": "nessuna alterazione", "en": "no sharps or flats"},
+    "armatura_diesis_1": {"it": "1 diesis", "en": "1 sharp"},
+    "armatura_diesis": {"it": "{n} diesis", "en": "{n} sharps"},
+    "armatura_bemolli_1": {"it": "1 bemolle", "en": "1 flat"},
+    "armatura_bemolli": {"it": "{n} bemolli", "en": "{n} flats"},
     # testi dei segni scritti in partitura
     "segno_ds": {"it": "D.S.", "en": "D.S."},
     "segno_ds_coda": {"it": "D.S. al Coda", "en": "D.S. al Coda"},

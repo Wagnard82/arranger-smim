@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from . import (analizzatore, esportatore, ia, ingestione, interprete,
-               lilypond, orchestratore, richiesta, ripetizioni, vincoli)
+               lilypond, orchestratore, richiesta, ripetizioni, tonalita,
+               vincoli)
 from .lingua import accompagnamento as nome_accompagnamento
 from .lingua import stile as nome_stile
 from .lingua import t as testo
@@ -70,6 +71,13 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
 
     # --- Modulo 3.1
     analisi = analizzatore.analizza(master)
+
+    # tonalita' piu' comoda per l'organico: solo un suggerimento nel report,
+    # e solo se il docente non ha gia' scelto un trasporto
+    if not cfg.trasporto:
+        consiglio_tono = tonalita.suggerisci_trasporto(master, cfg, analisi.melodia)
+        if consiglio_tono is not None:
+            forma.append(consiglio_tono.testo(cfg.lingua))
 
     riferimenti = None
     if cfg.usa_ia and ia.disponibile():
