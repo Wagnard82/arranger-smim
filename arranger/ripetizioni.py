@@ -18,7 +18,7 @@ volte si suona l'ultima. «To Coda» e «Fine» valgono solo dopo il salto.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from .lingua import t
 from .modello import Evento, Misura, Partitura
@@ -49,6 +49,25 @@ def _ultima_volta(misure: List[Misura]) -> List[int]:
     return ultima
 
 
+def _gruppi_volte(misure: List[Misura]) -> List[Optional[Tuple[int, int]]]:
+    """Per ogni misura dentro le volte, il suo gruppo di volte come
+    (prima misura, misura dopo l'ultima); None fuori dalle volte."""
+    n = len(misure)
+    gruppi: List[Optional[Tuple[int, int]]] = [None] * n
+    i = 0
+    while i < n:
+        if not misure[i].ripresa.volte:
+            i += 1
+            continue
+        j = i
+        while j < n and misure[j].ripresa.volte:
+            j += 1
+        for k in range(i, j):
+            gruppi[k] = (i, j)
+        i = j
+    return gruppi
+
+
 def ordine_con_esito(misure: List[Misura]) -> Tuple[List[int], str]:
     """
     Indici delle misure nell'ordine in cui si suonano, e l'esito:
@@ -68,8 +87,17 @@ def ordine_con_esito(misure: List[Misura]) -> Tuple[List[int], str]:
     i, passo, inizio_rit = 0, 1, 0
     eseguiti: Dict[int, int] = {}
     dopo_salto, salti_fatti, indice_salto = False, set(), -1
+    visitata = -1                 # ultima misura guardata, suonata o saltata
     while i < n:
         r = r_[i]
+        # uscendo in avanti da un gruppo di volte il ritornello e' finito:
+        # il :| sta nella 1a volta, che all'ultimo passaggio si salta
+        if (not dopo_salto and not r.volte and visitata >= 0
+                and i == visitata + 1 and r_[visitata].volte):
+            passo = 1
+            if not nessun_inizio:
+                inizio_rit = i
+        visitata = i
         if r.ritornello_inizio and not dopo_salto and inizio_rit != i:
             inizio_rit, passo = i, 1
         if r.volte:
@@ -177,15 +205,29 @@ def controlla(misure: List[Misura], lingua: str) -> List[str]:
         if not any(r_[k].ritornello_fine for k in range(i, j)):
             avvisi.append(t("ripresa_volta_fuori", lingua, mis=num[i]))
         i = j
-    # :| dopo un altro :| senza un |: in mezzo
+    # :| dopo un altro :| senza un |: in mezzo (non conta il :| di un'altra
+    # volta dello stesso gruppo): si riprende dalla misura dopo il :|
+    # precedente, o dopo il suo gruppo di volte; senza nessun |: nel brano,
+    # dall'inizio. E' la regola di `ordine_con_esito`.
+    gruppo = _gruppi_volte(misure)
+    nessun_inizio = not any(r.ritornello_inizio for r in r_)
     ultimo_fine = -1
     for i, r in enumerate(r_):
         if r.ritornello_inizio:
             ultimo_fine = -1
-        if r.ritornello_fine:
-            if ultimo_fine >= 0:
-                avvisi.append(t("ripresa_senza_inizio", lingua, mis=num[i]))
-            ultimo_fine = i
+        if not r.ritornello_fine:
+            continue
+        stesso_gruppo = gruppo[i] is not None and gruppo[i] == gruppo[ultimo_fine]
+        if ultimo_fine >= 0 and not stesso_gruppo:
+            if nessun_inizio:
+                da = 0
+            elif gruppo[ultimo_fine] is not None:
+                da = gruppo[ultimo_fine][1]
+            else:
+                da = ultimo_fine + 1
+            avvisi.append(t("ripresa_senza_inizio", lingua, mis=num[i],
+                            da=num[min(da, n - 1)]))
+        ultimo_fine = i
     # salti senza destinazione
     for i, r in enumerate(r_):
         if r.salto == "ds" and not any(x.segno for x in r_):

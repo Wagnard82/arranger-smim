@@ -180,9 +180,11 @@ class EsportatoreLilyPond:
                              f"#(ly:make-moment {m.num}/{m.den})")
                 lunghezza_corrente = None
             prima = parte is self.p.parti[0] and rigo == 1
-            righe.extend(self._ripresa_prima(m, prima))
+            precedente = misure[i - 1] if i > 0 else None
+            seguente = misure[i + 1] if i + 1 < len(misure) else None
+            righe.extend(self._ripresa_prima(m, precedente, prima))
             righe.append("  " + self._misura(eventi, m, parte, armatura))
-            righe.extend(self._ripresa_dopo(m, prima))
+            righe.extend(self._ripresa_dopo(m, seguente, prima))
         return "\n".join(righe)
 
     # ------------------------------------------------------ segni di ripresa
@@ -190,12 +192,18 @@ class EsportatoreLilyPond:
     # partitura intera e si scrivono una volta sola, nel primo rigo.
     # Sorgente verificato dai test; incisione NON verificata (LilyPond non
     # e' installato nell'ambiente di sviluppo).
-    def _ripresa_prima(self, m: Misura, prima: bool) -> List[str]:
+    # Una stanghetta o un comando di volta che cade nello stesso istante di
+    # quello della misura prima (:| seguito da |:, fine della 1a volta e
+    # inizio della 2a) e' gia' stato scritto insieme a quello: due \\bar
+    # nello stesso istante si cancellano, vince l'ultimo.
+    def _ripresa_prima(self, m: Misura, precedente: Optional[Misura],
+                       prima: bool) -> List[str]:
         s = m.ripresa
+        p = precedente.ripresa if precedente is not None else None
         r: List[str] = []
-        if s.ritornello_inizio:
+        if s.ritornello_inizio and not (p and p.ritornello_fine):
             r.append('  \\bar ".|:"')
-        if prima and s.volta_apre:
+        if prima and s.volta_apre and not (p and p.volta_chiude):
             etichetta = ", ".join(str(v) for v in s.volte) + "."
             r.append(f"  \\set Score.repeatCommands = #'((volta \"{etichetta}\"))")
         if prima and s.segno:
@@ -204,9 +212,11 @@ class EsportatoreLilyPond:
             r.append('  \\mark \\markup { \\musicglyph "scripts.coda" }')
         return r
 
-    def _ripresa_dopo(self, m: Misura, prima: bool) -> List[str]:
+    def _ripresa_dopo(self, m: Misura, seguente: Optional[Misura],
+                      prima: bool) -> List[str]:
         from .lingua import t as testo
         s = m.ripresa
+        q = seguente.ripresa if seguente is not None else None
         r: List[str] = []
         if prima:
             testi = []
@@ -221,9 +231,14 @@ class EsportatoreLilyPond:
                 scritta = scritta.replace('"', '\\"')
                 r.append(f'  \\textEndMark \\markup {{ \\italic "{scritta}" }}')
             if s.volta_chiude:
-                r.append("  \\set Score.repeatCommands = #'((volta #f))")
+                comandi = "(volta #f)"
+                if q and q.volta_apre:
+                    etichetta = ", ".join(str(v) for v in q.volte) + "."
+                    comandi += f' (volta "{etichetta}")'
+                r.append(f"  \\set Score.repeatCommands = #'({comandi})")
         if s.ritornello_fine:
-            r.append('  \\bar ":|."')
+            r.append('  \\bar ":|.|:"' if q and q.ritornello_inizio
+                     else '  \\bar ":|."')
         return r
 
     def _partial(self, durata: float) -> str:

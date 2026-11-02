@@ -3931,6 +3931,67 @@ def test_segni_lilypond(es):
     verifica("D.S. al Coda" in ly and "Al Coda" in ly, "testi dei salti")
 
 
+def test_ripresa_dopo_le_volte(es):
+    """Correzioni della revisione finale: il conteggio dei passaggi riparte
+    dopo un gruppo di volte; l'avviso sul ritornello senza inizio dice da
+    dove si riprende davvero e tace sulle tre volte; in LilyPond due
+    stanghette di ritornello consecutive non si cancellano a vicenda."""
+    from arranger import ripetizioni
+    from arranger.modello import SegniRipresa as S
+
+    def finte(segni):
+        ms = [Misura(i + 1, 4.0 * i, 4.0) for i in range(len(segni))]
+        for m, s in zip(ms, segni):
+            m.ripresa = s or S()
+        return ms
+    v1 = dict(volta_apre=True, volta_chiude="stop")
+    # |:A [1 B:|] [2 C] D E:|
+    ms = finte([S(ritornello_inizio=True), S(volte=(1,), ritornello_fine=2, **v1),
+                S(volte=(2,), volta_apre=True, volta_chiude="discontinue"), None,
+                S(ritornello_fine=2)])
+    numeri = [i + 1 for i in ripetizioni.ordine_esecuzione(ms)]
+    verifica(numeri == [1, 2, 1, 3, 4, 5, 4, 5], f"ritornello dopo le volte: {numeri}")
+    msg = ripetizioni.controlla(ms, "it")
+    verifica(any("mis. 5" in m and "mis. 4" in m for m in msg),
+             f"l'avviso dice da dove si riprende: {msg}")
+    # |:A [1 B:|] [2 C] D [1 E:|] [2 F]
+    ms = finte([S(ritornello_inizio=True), S(volte=(1,), ritornello_fine=2, **v1),
+                S(volte=(2,), volta_apre=True, volta_chiude="discontinue"), None,
+                S(volte=(1,), ritornello_fine=2, **v1),
+                S(volte=(2,), volta_apre=True, volta_chiude="discontinue")])
+    numeri = [i + 1 for i in ripetizioni.ordine_esecuzione(ms)]
+    verifica(numeri == [1, 2, 1, 3, 4, 5, 4, 6], f"due gruppi di volte: {numeri}")
+    # |:A [1 B:|] [2 C:|] [3 D]: tre volte, nessun avviso
+    ms = finte([S(ritornello_inizio=True), S(volte=(1,), ritornello_fine=2, **v1),
+                S(volte=(2,), ritornello_fine=2, **v1),
+                S(volte=(3,), volta_apre=True, volta_chiude="discontinue")])
+    numeri = [i + 1 for i in ripetizioni.ordine_esecuzione(ms)]
+    verifica(numeri == [1, 2, 1, 3, 1, 4], f"tre volte: {numeri}")
+    verifica(not any("senza segno d'inizio" in m for m in ripetizioni.controlla(ms, "it")),
+             "tre volte: nessun falso avviso")
+    # X |:A:| B:| : si riprende dalla misura dopo il :| precedente, non dall'inizio
+    ms = finte([None, S(ritornello_inizio=True, ritornello_fine=2), S(ritornello_fine=2)])
+    numeri = [i + 1 for i in ripetizioni.ordine_esecuzione(ms)]
+    verifica(numeri == [1, 2, 2, 3, 3], f"X |:A:| B:|: {numeri}")
+    msg = ripetizioni.controlla(ms, "it")
+    verifica(any("mis. 3" in m and "inizio del brano" not in m
+                 for m in msg if "senza segno" in m), f"avviso coerente: {msg}")
+
+    # LilyPond: |:A:||:B:| deve tenere la stanghetta doppia di ritornello
+    from arranger import lilypond
+    from arranger.modello import Evento, Parte, Partitura
+    ms = finte([S(ritornello_inizio=True, ritornello_fine=2),
+                S(ritornello_inizio=True, ritornello_fine=2)])
+    p = Parte(id="x", nome="Flauto", abbrev="Fl.", strumento="flauto",
+              eventi=[Evento(inizio=0.0, durata=8.0, altezze=[72])])
+    ly = lilypond.EsportatoreLilyPond(Partitura(misure=ms, parti=[p])).sorgente()
+    verifica('\\bar ":|.|:"' in ly, "stanghetta :|.|: fra due ritornelli")
+    ms = finte([S(ritornello_inizio=True), S(volte=(1,), ritornello_fine=2, **v1),
+                S(volte=(2,), volta_apre=True, volta_chiude="stop")])
+    ly = lilypond.EsportatoreLilyPond(Partitura(misure=ms, parti=[p])).sorgente()
+    verifica("(volta #f) (volta \"2.\")" in ly, "fine della 1a volta e inizio della 2a insieme")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -3960,6 +4021,7 @@ if __name__ == "__main__":
     test_segni_nel_musicxml(es)
     test_midi_srotolato(es)
     test_segni_lilypond(es)
+    test_ripresa_dopo_le_volte(es)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)
