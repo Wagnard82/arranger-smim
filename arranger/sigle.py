@@ -28,7 +28,7 @@ _ALTERAZIONI = {"#": 1, "♯": 1, "b": -1, "♭": -1}
 # suffisso -> qualita' del modello (maiuscole e minuscole contano: M7 e m7)
 _SUFFISSI = {
     "": "maj", "maj": "maj", "M": "maj",
-    "m": "min", "-": "min", "min": "min", "mi": "min",
+    "m": "min", "-": "min", "min": "min", "mi": "min", "mi7": "min7",
     "7": "dom7",
     "m7": "min7", "-7": "min7", "min7": "min7",
     "maj7": "maj7", "M7": "maj7", "Δ": "maj7", "Δ7": "maj7", "7M": "maj7",
@@ -36,7 +36,7 @@ _SUFFISSI = {
     "dim7": "dim7", "°7": "dim7", "o7": "dim7",
     "m7b5": "m7b5", "ø": "m7b5", "ø7": "m7b5", "-7b5": "m7b5",
     "aug": "aug", "+": "aug", "#5": "aug",
-    "sus4": "sus4", "sus": "sus4", "7sus4": "sus4",
+    "sus4": "sus4", "sus": "sus4", "7sus4": "sus4", "7sus": "sus4",
     "6": "6",
     "m6": "m6", "-6": "m6",
     # forme fuori vocabolario, ricondotte alla piu' vicina
@@ -45,22 +45,26 @@ _SUFFISSI = {
 }
 
 
-def _fondamentale(testo: str) -> Tuple[Optional[int], str]:
-    """(classe d'altezza, resto del testo); None se non comincia con una nota."""
+def _fondamentali(testo: str) -> List[Tuple[int, str]]:
+    """
+    Le letture possibili dell'inizio del testo: (classe d'altezza, resto).
+    Prima il nome italiano, poi la lettera inglese: «Faug» e' Fa + «ug»
+    (non valido) oppure F + «aug», e vince la lettura col suffisso valido.
+    """
     basso = testo.lower()
-    radice, resto = None, ""
+    letture = []
     for nome, pc in _NOMI_IT:
         if basso.startswith(nome):
-            radice, resto = pc, testo[len(nome):]
+            letture.append((pc, testo[len(nome):]))
             break
-    if radice is None and basso[:1] in _LETTERE:
-        radice, resto = _LETTERE[basso[0]], testo[1:]
-    if radice is None:
-        return None, testo
-    if resto[:1] in _ALTERAZIONI:
-        radice = (radice + _ALTERAZIONI[resto[0]]) % 12
-        resto = resto[1:]
-    return radice, resto
+    if basso[:1] in _LETTERE:
+        letture.append((_LETTERE[basso[0]], testo[1:]))
+    fuori = []
+    for radice, resto in letture:
+        if resto[:1] in _ALTERAZIONI:
+            radice, resto = (radice + _ALTERAZIONI[resto[0]]) % 12, resto[1:]
+        fuori.append((radice, resto))
+    return fuori
 
 
 def leggi_sigla(testo: str) -> Optional[Tuple[int, str, Optional[int]]]:
@@ -72,13 +76,14 @@ def leggi_sigla(testo: str) -> Optional[Tuple[int, str, Optional[int]]]:
     if not testo:
         return None
     corpo, _, dopo = testo.partition("/")
-    radice, suffisso = _fondamentale(corpo)
-    if radice is None or suffisso not in _SUFFISSI:
+    corpo_letto = next(((r, q) for r, q in _fondamentali(corpo) if q in _SUFFISSI), None)
+    if corpo_letto is None:
         return None
+    radice, suffisso = corpo_letto
     basso = None
     if dopo:
-        basso, avanzo = _fondamentale(dopo)
-        if basso is None or avanzo:
+        basso = next((r for r, avanzo in _fondamentali(dopo) if not avanzo), None)
+        if basso is None:
             return None
         if basso == radice:
             basso = None

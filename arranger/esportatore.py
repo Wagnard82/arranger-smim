@@ -62,10 +62,25 @@ _SUFFISSI_SIGLA = {
 }
 
 
+# le note col diesis nell'armatura, nell'ordine dei diesis (Fa# Do# Sol# ...)
+_ORDINE_DIESIS = (6, 1, 8, 3, 10, 5, 0)
+
+
 def nome_per_sigla(pc: int, fifths: int) -> str:
-    tabella = (_SIGLE_BEMOLLI if fifths < 0 else
-               _SIGLE_DIESIS if fifths > 0 else _SIGLE_NEUTRE)
-    return tabella[pc % 12]
+    """
+    Nelle tonalita' coi diesis si scrivono col diesis solo le note alterate
+    dell'armatura; gli altri tasti neri vanno col bemolle, come li scrive un
+    musicista: in Re maggiore il bVI e' Bb, non A# (revisione dell'editor
+    delle sigle, 3/11/2026).
+    """
+    pc %= 12
+    if fifths < 0:
+        return _SIGLE_BEMOLLI[pc]
+    if fifths == 0:
+        return _SIGLE_NEUTRE[pc]
+    if pc in _ORDINE_DIESIS[:fifths]:
+        return _SIGLE_DIESIS[pc]
+    return _SIGLE_BEMOLLI[pc]
 
 
 def sigla_scritta(acc: Accordo, fifths: int) -> str:

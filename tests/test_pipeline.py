@@ -4322,6 +4322,17 @@ def test_leggi_scrivi_sigle():
         verifica(S.leggi_sigla(sbagliata) is None, f"non e' una sigla: {sbagliata!r}")
     verifica(S.scrivi_sigla(10, "maj", None, -1) == "Bb", "in Fa si scrive Bb")
     verifica(S.scrivi_sigla(5, "maj", 9, 0) == "F/A", "rivolto")
+    # revisione finale: i bemolli fuori tonalita' anche nelle tonalita' coi diesis
+    verifica(S.scrivi_sigla(10, "maj", None, 2) == "Bb", f"Bb in Re: {S.scrivi_sigla(10, 'maj', None, 2)}")
+    verifica(S.scrivi_sigla(8, "maj", None, 1) == "Ab", f"Ab in Sol: {S.scrivi_sigla(8, 'maj', None, 1)}")
+    verifica(S.scrivi_sigla(6, "maj", None, 2) == "F#", "F# in Re resta diesis")
+    verifica(S.scrivi_sigla(1, "dom7", None, 3) == "C#7", "C#7 in La resta diesis")
+    verifica(S.tavolozza(2, "maggiore", 2)[-1]["sigla"] == "Bb", "bVI in Re: Bb")
+    # revisione finale: i nomi inglesi non vanno letti come italiani
+    for testo, atteso in {"Fadd9": (5, "maj", None), "Faug": (5, "aug", None),
+                          "Cmi7": (0, "min7", None), "C7sus": (0, "sus4", None),
+                          "Fa7": (5, "dom7", None)}.items():
+        verifica(S.leggi_sigla(testo) == atteso, f"leggi {testo!r}: {S.leggi_sigla(testo)}")
     for q in ("maj", "min", "dom7", "min7", "maj7", "dim", "aug", "sus4", "6", "m6",
               "dim7", "m7b5"):
         for f in (-3, 0, 3):
