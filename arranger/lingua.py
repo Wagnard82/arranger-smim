@@ -570,6 +570,11 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
     "armatura_diesis": {"it": "{n} diesis", "en": "{n} sharps"},
     "armatura_bemolli_1": {"it": "1 bemolle", "en": "1 flat"},
     "armatura_bemolli": {"it": "{n} bemolli", "en": "{n} flats"},
+    # ---- editor delle sigle (sito)
+    "sigla_illeggibile": {
+        "it": "La sigla «{testo}» non si legge: scrivila come C, Am7, F/A oppure Do, La-7, Fa/La.",
+        "en": "Can't read the chord «{testo}»: write it like C, Am7, F/A.",
+    },
     # testi dei segni scritti in partitura
     "segno_ds": {"it": "D.S.", "en": "D.S."},
     "segno_ds_coda": {"it": "D.S. al Coda", "en": "D.S. al Coda"},

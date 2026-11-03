@@ -4303,6 +4303,32 @@ def test_armonia_in_piedi_vuoti():
     verifica(len(vuoto) == 1, f"due misure vuote non si toccano: {vuoto}")
 
 
+# --------------------------------------------------------------------------
+# Editor delle sigle (sito): lettura, scrittura, tavolozza, proposta
+# --------------------------------------------------------------------------
+
+
+def test_leggi_scrivi_sigle():
+    """Le sigle scritte dal docente, in inglese o in italiano."""
+    from arranger import sigle as S
+    casi = {"Am7": (9, "min7", None), "F/A": (5, "maj", 9), "Bb": (10, "maj", None),
+            "C#m7b5": (1, "m7b5", None), "G7sus4": (7, "sus4", None),
+            "La-7": (9, "min7", None), "Lam": (9, "min", None), "Fa/La": (5, "maj", 9),
+            "Sib": (10, "maj", None), " am7 ": (9, "min7", None), "Do": (0, "maj", None),
+            "Dm": (2, "min", None), "Cadd9": (0, "maj", None), "E9": (4, "dom7", None)}
+    for testo, atteso in casi.items():
+        verifica(S.leggi_sigla(testo) == atteso, f"leggi {testo!r}: {S.leggi_sigla(testo)}")
+    for sbagliata in ("xyz", "H7", "", "C/Q", "Cmaj13#11b9"):
+        verifica(S.leggi_sigla(sbagliata) is None, f"non e' una sigla: {sbagliata!r}")
+    verifica(S.scrivi_sigla(10, "maj", None, -1) == "Bb", "in Fa si scrive Bb")
+    verifica(S.scrivi_sigla(5, "maj", 9, 0) == "F/A", "rivolto")
+    for q in ("maj", "min", "dom7", "min7", "maj7", "dim", "aug", "sus4", "6", "m6",
+              "dim7", "m7b5"):
+        for f in (-3, 0, 3):
+            verifica(S.leggi_sigla(S.scrivi_sigla(2, q, 6, f)) == (2, q, 6),
+                     f"andata e ritorno {q} {f}: {S.scrivi_sigla(2, q, 6, f)}")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4349,6 +4375,7 @@ if __name__ == "__main__":
     test_armonia_in_piedi_frasi_uguali()
     test_armonia_pop_modale()
     test_armonia_in_piedi_vuoti()
+    test_leggi_scrivi_sigle()
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)
