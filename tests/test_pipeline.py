@@ -4329,6 +4329,38 @@ def test_leggi_scrivi_sigle():
                      f"andata e ritorno {q} {f}: {S.scrivi_sigla(2, q, 6, f)}")
 
 
+def test_tavolozza_proposta_disegno():
+    """Tavolozza della tonalita', proposta di partenza, MusicXML della sola
+    melodia con le sigle (anche a meta' di una nota tenuta)."""
+    from arranger import sigle as S
+    d = os.path.join(os.path.dirname(QUI), "esempi")
+    gradi = [x["grado"] for x in S.tavolozza(0, "maggiore", 0)]
+    verifica(gradi == ["I", "ii", "iii", "IV", "V", "vi", "V7", "bVII", "bVI"], f"gradi: {gradi}")
+    verifica([x["sigla"] for x in S.tavolozza(0, "maggiore", 0)][:6]
+             == ["C", "Dm", "Em", "F", "G", "Am"], "sigle in Do")
+    verifica([x["sigla"] for x in S.tavolozza(9, "minore", 0)][:4]
+             == ["Am", "Bdim", "C", "Dm"], f"La minore: {S.tavolozza(9, 'minore', 0)[:4]}")
+    verifica(S.tavolozza(10, "maggiore", -2)[0]["sigla"] == "Bb", "Si bemolle")
+    vero = ingestione.ingerisci(genera_esempi.lead_sheet(os.path.join(d, "lead_sheet.xml")))
+    sigle, origine = S.proposta(vero)
+    verifica(origine == "file" and sigle == sorted(vero.sigle), "sigle del file")
+    nudo = ingestione.ingerisci(os.path.join(d, "inno_nudo.xml"))
+    sigle, origine = S.proposta(nudo)
+    verifica(origine == "proposta" and sigle, "proposta per la melodia nuda")
+    # una sigla DIVERSA a meta' della nota tenuta di m4 (una uguale a quella
+    # in corso l'esportatore la fonde, com'e' giusto)
+    tenuta = sorted(sigle + [(13.0, 4, "min", None)])
+    xml = S.melodia_con_sigle(nudo, tenuta)
+    os.makedirs(os.path.join(QUI, "_out"), exist_ok=True)
+    percorso = os.path.join(QUI, "_out", "melodia_con_sigle.musicxml")
+    with open(percorso, "w", encoding="utf-8") as f:
+        f.write(xml)
+    riletto = ingestione.ingerisci(percorso)
+    verifica(xml.count("<part ") == 1, "un rigo solo")
+    verifica(sorted(riletto.sigle) == tenuta,
+             f"riletto con le stesse sigle: {sorted(riletto.sigle)[:6]} / {tenuta[:6]}")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4376,6 +4408,7 @@ if __name__ == "__main__":
     test_armonia_pop_modale()
     test_armonia_in_piedi_vuoti()
     test_leggi_scrivi_sigle()
+    test_tavolozza_proposta_disegno()
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

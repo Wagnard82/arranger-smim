@@ -13,10 +13,12 @@ qualita', basso pc o None), la stessa di Spartito.sigle.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .esportatore import sigla_scritta
-from .modello import Accordo
+from .modello import Accordo, Evento, Parte, Partitura, Spartito
+
+Sigla = Tuple[float, int, str, Optional[int]]
 
 # nomi italiani prima delle lettere: "Do" e' Do, non Re diminuito
 _NOMI_IT = (("sol", 7), ("do", 0), ("re", 2), ("mi", 4), ("fa", 5), ("la", 9), ("si", 11))
@@ -88,3 +90,63 @@ def scrivi_sigla(fondamentale: int, qualita: str, basso: Optional[int],
     """La forma standard, come in partitura: 'Bb', 'F#m7', 'C/E'."""
     return sigla_scritta(Accordo(inizio=0, durata=1, fondamentale=fondamentale,
                                  qualita=qualita, basso=basso), fifths)
+
+
+# --------------------------------------------------------------------------
+# Tavolozza, proposta, MusicXML da disegnare
+# --------------------------------------------------------------------------
+
+# gradi proposti dalla tavolozza: (grado, distanza dalla tonica, qualita')
+_TAVOLOZZA = {
+    "maggiore": (("I", 0, "maj"), ("ii", 2, "min"), ("iii", 4, "min"), ("IV", 5, "maj"),
+                 ("V", 7, "maj"), ("vi", 9, "min"), ("V7", 7, "dom7"),
+                 # i prestiti del pop: misolidio ed eolio
+                 ("bVII", 10, "maj"), ("bVI", 8, "maj")),
+    "minore": (("i", 0, "min"), ("ii°", 2, "dim"), ("III", 3, "maj"), ("iv", 5, "min"),
+               ("V", 7, "maj"), ("V7", 7, "dom7"), ("VI", 8, "maj"), ("VII", 10, "maj")),
+}
+
+
+def tavolozza(tonica: int, modo: str, fifths: int) -> List[Dict[str, object]]:
+    """Gli accordi che l'editor offre con un clic, gia' col nome."""
+    fuori = []
+    for grado, d, q in _TAVOLOZZA.get(modo, _TAVOLOZZA["maggiore"]):
+        r = (tonica + d) % 12
+        fuori.append({"grado": grado, "sigla": scrivi_sigla(r, q, None, fifths),
+                      "fondamentale": r, "qualita": q})
+    return fuori
+
+
+def proposta(sp: Spartito) -> Tuple[List[Sigla], str]:
+    """
+    Le sigle da mostrare nell'editor e la loro origine: "file" se lo
+    spartito le porta, "proposta" se vengono dall'armonizzatore (da
+    controllare: dalla sola melodia non si ricostruisce l'armonia del brano).
+    """
+    if sp.sigle:
+        return sorted(sp.sigle), "file"
+    from .analizzatore import melodia_dello_spartito
+    from .armonizzazione import armonizza
+    accordi = armonizza(sp, melodia_dello_spartito(sp))
+    return [(a.inizio, a.fondamentale, a.qualita, a.basso) for a in accordi], "proposta"
+
+
+def melodia_con_sigle(sp: Spartito, sigle: List[Sigla]) -> str:
+    """MusicXML di un solo rigo, la melodia, con le sigle in <harmony>: e'
+    il file che l'editor disegna nel browser."""
+    from .analizzatore import melodia_dello_spartito
+    from .esportatore import EsportatoreMusicXML
+    ordinate = sorted(sigle)
+    fine = sp.durata_totale
+    armonia = [Accordo(inizio=t, durata=max(0.0, (ordinate[i + 1][0] if i + 1 < len(ordinate)
+                                                  else fine) - t),
+                       fondamentale=r, qualita=q, basso=b)
+               for i, (t, r, q, b) in enumerate(ordinate)]
+    parte = Parte(id="melodia", nome="Melodia", abbrev="Mel.", strumento="flauto",
+                  mostra_sigle=True,
+                  eventi=[Evento(inizio=n.inizio, durata=n.durata, altezze=[n.midi],
+                                 letterale=True)
+                          for n in melodia_dello_spartito(sp)])
+    part = Partitura(titolo=sp.titolo, compositore=sp.compositore, parti=[parte],
+                     misure=sp.misure, bpm=sp.bpm, armonia=armonia)
+    return EsportatoreMusicXML(part).xml()

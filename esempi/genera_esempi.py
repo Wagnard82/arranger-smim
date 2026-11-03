@@ -707,7 +707,7 @@ def lead_sheet(percorso, sigle=True):
         [(D, 1.5), (C, 0.5), (C, 2)],
     ]
     # (quarto della battuta, fondamentale, kind)
-    sigle = [
+    accordi = [
         [(0, "C", "major")], [(0, "G", "major")], [(0, "C", "major")],
         [(0, "G", "dominant")],
         [(0, "C", "major")], [(0, "G", "major")], [(0, "C", "major")],
@@ -738,7 +738,7 @@ def lead_sheet(percorso, sigle=True):
                       "        <clef><sign>G</sign><line>2</line></clef>",
                       "      </attributes>"]
             righe += _dinamica("mf")
-        da_scrivere = list(sigle[i])
+        da_scrivere = list(accordi[i])
         t = 0.0
         for midi, q in battuta:
             while da_scrivere and da_scrivere[0][0] <= t + 1e-6:

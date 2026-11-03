@@ -19,7 +19,7 @@
   "arranger/pipeline.py": "465f6978def1841d856ba9cd5e21127f867d8b72175324ad0eac4ff0c788eeb6",
   "arranger/richiesta.py": "f21aeb2f4f0b5ae9ebf9ae96032e5af2077094764d7b2338ffc59cbe3f09538f",
   "arranger/ripetizioni.py": "570dcbdd3ed2e03953b71dd1f1d8adc232e73395c686d2fef4e5ed94460f8d47",
-  "arranger/sigle.py": "e1b8b03f20afd244a032488e6d0b37907ed08cccd9f08e84170c741235d555af",
+  "arranger/sigle.py": "9734db8bfdff91a8412fe73a5484da84f9191e95f5703e80de7f788d0fef268e",
   "arranger/strumenti.py": "1a3f979f0334210a92d800ed56247b55f504d5e66051fcfc26794c7854e531bf",
   "arranger/testi_interfaccia.py": "6b9eedc78026316813e1a067b859aec99404b3cb59a96debaee65d645d6c6513",
   "arranger/tonalita.py": "066a0231e892956711fd21a32167205bddd5212f9d73dc2754243f28844ec42a",
@@ -27,7 +27,7 @@
   "arranger/vincoli.py": "9d3018974937b5e2098b3316963b307a8b3ad83cbc8d54b5f696a0f075ae0dd2",
   "controllo_file.py": "abec0ac6ec121da401e9467fcadf16e3c300d76193803c1a25d78203566ba777",
   "esempi/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "esempi/genera_esempi.py": "4a56a04508e9309202f8f69df35825e4bf7b032e3332847a238338a0980ba1a3",
+  "esempi/genera_esempi.py": "db74079c3b0d7e9f73c3dc7bb6640eec85b1c0ac5cc76039baf0a84792a85e75",
   "requirements.txt": "869ca61ac74f9d98d4a908a8b0cfeeabf3d022e5fc88980d283bc1bb9d8862b7"
  },
  "versione": "0.9.7"

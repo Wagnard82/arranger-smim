@@ -16,10 +16,6 @@
       <direction placement="below">
         <direction-type><dynamics><mf/></dynamics></direction-type>
       </direction>
-      <harmony>
-        <root><root-step>C</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>E</step>
@@ -58,10 +54,6 @@
       </note>
     </measure>
     <measure number="2">
-      <harmony>
-        <root><root-step>G</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>G</step>
@@ -100,10 +92,6 @@
       </note>
     </measure>
     <measure number="3">
-      <harmony>
-        <root><root-step>C</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>C</step>
@@ -142,10 +130,6 @@
       </note>
     </measure>
     <measure number="4">
-      <harmony>
-        <root><root-step>G</root-step></root>
-        <kind>dominant</kind>
-      </harmony>
       <note>
         <pitch>
           <step>E</step>
@@ -176,10 +160,6 @@
       </note>
     </measure>
     <measure number="5">
-      <harmony>
-        <root><root-step>C</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>E</step>
@@ -218,10 +198,6 @@
       </note>
     </measure>
     <measure number="6">
-      <harmony>
-        <root><root-step>G</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>G</step>
@@ -260,10 +236,6 @@
       </note>
     </measure>
     <measure number="7">
-      <harmony>
-        <root><root-step>C</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>C</step>
@@ -302,10 +274,6 @@
       </note>
     </measure>
     <measure number="8">
-      <harmony>
-        <root><root-step>G</root-step></root>
-        <kind>dominant</kind>
-      </harmony>
       <note>
         <pitch>
           <step>D</step>
@@ -325,10 +293,6 @@
         <voice>1</voice>
         <type>eighth</type>
       </note>
-      <harmony>
-        <root><root-step>C</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>C</step>
@@ -340,10 +304,6 @@
       </note>
     </measure>
     <measure number="9">
-      <harmony>
-        <root><root-step>G</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>D</step>
@@ -382,10 +342,6 @@
       </note>
     </measure>
     <measure number="10">
-      <harmony>
-        <root><root-step>C</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>D</step>
@@ -433,10 +389,6 @@
       </note>
     </measure>
     <measure number="11">
-      <harmony>
-        <root><root-step>G</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>D</step>
@@ -484,10 +436,6 @@
       </note>
     </measure>
     <measure number="12">
-      <harmony>
-        <root><root-step>C</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>C</step>
@@ -506,10 +454,6 @@
         <voice>1</voice>
         <type>quarter</type>
       </note>
-      <harmony>
-        <root><root-step>G</root-step></root>
-        <kind>dominant</kind>
-      </harmony>
       <note>
         <pitch>
           <step>G</step>
@@ -521,10 +465,6 @@
       </note>
     </measure>
     <measure number="13">
-      <harmony>
-        <root><root-step>C</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>E</step>
@@ -563,10 +503,6 @@
       </note>
     </measure>
     <measure number="14">
-      <harmony>
-        <root><root-step>G</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>G</step>
@@ -605,10 +541,6 @@
       </note>
     </measure>
     <measure number="15">
-      <harmony>
-        <root><root-step>C</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>C</step>
@@ -647,10 +579,6 @@
       </note>
     </measure>
     <measure number="16">
-      <harmony>
-        <root><root-step>G</root-step></root>
-        <kind>dominant</kind>
-      </harmony>
       <note>
         <pitch>
           <step>D</step>
@@ -670,10 +598,6 @@
         <voice>1</voice>
         <type>eighth</type>
       </note>
-      <harmony>
-        <root><root-step>C</root-step></root>
-        <kind>major</kind>
-      </harmony>
       <note>
         <pitch>
           <step>C</step>
