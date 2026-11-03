@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from . import (analizzatore, esportatore, ia, ingestione, interprete,
                lilypond, orchestratore, richiesta, ripetizioni, tonalita,
@@ -35,7 +35,9 @@ class Risultato:
 def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
            nome_base: Optional[str] = None, esporta_anteprima_midi: bool = True,
            spartito: Optional[Spartito] = None, esporta_ly: bool = False,
-           incidi_pdf: bool = False) -> Risultato:
+           incidi_pdf: bool = False,
+           sigle: Optional[List[Tuple[float, int, str, Optional[int]]]] = None
+           ) -> Risultato:
     """
     L'ingresso e' un MusicXML: riduzione pianistica, parte solista con
     pianoforte, oppure lead sheet (melodia con le sigle degli accordi).
@@ -46,6 +48,13 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
     master = spartito or ingestione.ingerisci(sorgente)
     # ritornelli, volte e salti: la forma riconosciuta va nel report
     forma = ripetizioni.controlla(master.misure, cfg.lingua)
+    # sigle dell'editor del sito: valgono solo per la sola melodia; con il
+    # pianoforte l'armonia la fanno le sue note
+    if sigle is not None:
+        if master.tipo == "lead_sheet":
+            master.sigle = sorted(sigle)
+        else:
+            forma.insert(0, testo("sigle_editor_ignorate", cfg.lingua))
 
     # --- Personalizzazione a parole: PRIMA di tutto il resto, perche' puo'
     # cambiare il trasporto e i parametri che orchestrazione e IA leggono.

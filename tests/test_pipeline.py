@@ -4361,6 +4361,32 @@ def test_tavolozza_proposta_disegno():
              f"riletto con le stesse sigle: {sorted(riletto.sigle)[:6]} / {tenuta[:6]}")
 
 
+def test_esegui_con_sigle(inno):
+    """Le sigle dell'editor fanno l'armonia della sola melodia; con il
+    pianoforte si ignorano e il report lo dice."""
+    d = os.path.join(os.path.dirname(QUI), "esempi")
+    cfg = Configurazione(formazione={"flauto": 1, "chitarra": 1, "pianoforte": 1})
+    nudo = os.path.join(d, "inno_nudo.xml")
+    mie = [(0.0, 9, "min", None), (8.0, 2, "min7", None), (16.0, 7, "dom7", None),
+           (24.0, 0, "maj", 4)]
+    r = esegui(nudo, cfg, cartella=os.path.join(QUI, "_out"), nome_base="mie_sigle", sigle=mie)
+    a = r.analisi.armonia
+    def accordo_a(t):
+        x = next(x for x in a if x.inizio - 1e-6 <= t < x.fine - 1e-6)
+        return x.fondamentale, x.qualita, x.basso
+    verifica([accordo_a(t) for t in (0.0, 8.0, 16.0, 24.0)]
+             == [(9, "min", None), (2, "min7", None), (7, "dom7", None), (0, "maj", 4)],
+             f"le sigle dell'editor fanno l'armonia: {[accordo_a(t) for t in (0.0, 8.0, 16.0, 24.0)]}")
+    r_en = esegui(nudo, Configurazione(formazione={"flauto": 1, "chitarra": 1, "pianoforte": 1},
+                  lingua="en"), cartella=os.path.join(QUI, "_out"), nome_base="mie_sigle_en",
+                  sigle=mie)
+    verifica([(e.inizio, e.altezze) for p in r.partitura.parti for e in p.eventi]
+             == [(e.inizio, e.altezze) for p in r_en.partitura.parti for e in p.eventi],
+             "stessa musica IT/EN")
+    p = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"), nome_base="pf_sigle", sigle=mie)
+    verifica(any("sigle dell'editor" in m for m in p.report), "con il pianoforte si ignorano")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4409,6 +4435,7 @@ if __name__ == "__main__":
     test_armonia_in_piedi_vuoti()
     test_leggi_scrivi_sigle()
     test_tavolozza_proposta_disegno()
+    test_esegui_con_sigle(inno)
     test_ingestione(inno)
     test_melodia(inno, basso)
     test_armonia(inno)

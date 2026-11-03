@@ -571,6 +571,10 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
     "armatura_bemolli_1": {"it": "1 bemolle", "en": "1 flat"},
     "armatura_bemolli": {"it": "{n} bemolli", "en": "{n} flats"},
     # ---- editor delle sigle (sito)
+    "sigle_editor_ignorate": {
+        "it": "[Ingresso] Le sigle dell'editor valgono solo per la sola melodia: questo spartito ha il pianoforte, e si seguono le sue note.",
+        "en": "[Input] The editor's chords only apply to a melody on its own: this score has a piano part, and its notes are followed.",
+    },
     "sigla_illeggibile": {
         "it": "La sigla «{testo}» non si legge: scrivila come C, Am7, F/A oppure Do, La-7, Fa/La.",
         "en": "Can't read the chord «{testo}»: write it like C, Am7, F/A.",
