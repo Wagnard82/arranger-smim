@@ -4396,6 +4396,14 @@ def test_esegui_con_sigle(inno):
              "stessa musica IT/EN")
     p = esegui(inno, cfg, cartella=os.path.join(QUI, "_out"), nome_base="pf_sigle", sigle=mie)
     verifica(any("sigle dell'editor" in m for m in p.report), "con il pianoforte si ignorano")
+    # revisione finale: il report dice da dove vengono le sigle
+    verifica(any("editor" in m and "4" in m for m in r.report if m.startswith("[Ingresso]")),
+             f"sigle corrette nell'editor nel report: {[m for m in r.report if m.startswith('[Ingresso]')]}")
+    verifica(not any("sigle del file" in m for m in r.report), "non sono sigle del file")
+    acc = esegui(nudo, cfg, cartella=os.path.join(QUI, "_out"), nome_base="proposta_accettata",
+                 sigle=mie, origine_sigle="proposta")
+    verifica(any("proposta" in m for m in acc.report if m.startswith("[Ingresso]")),
+             f"proposta accettata: l'avvertenza resta ({[m for m in acc.report if m.startswith('[Ingresso]')]})")
 
 
 if __name__ == "__main__":

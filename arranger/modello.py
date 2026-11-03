@@ -145,6 +145,9 @@ class Spartito:
     # [(offset, fondamentale pc, qualita, basso pc)] lette dai <harmony> del file
     gradazioni: List[Tuple[float, float, str]] = field(default_factory=list)
     # [(inizio, fine, "crescendo"/"diminuendo")] dalle forcelle <wedge>
+    origine_sigle: str = "file"
+    # da dove vengono le sigle: "file", "editor" (scritte o corrette nel
+    # sito) o "proposta" (dell'armonizzatore, accettata senza modifiche)
 
     # ---------------------------------------------------------------- utilita'
     @property

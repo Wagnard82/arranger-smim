@@ -351,6 +351,14 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
         "en": "[Fingering] {parte}: awkward notes at {livello} ({note}), {n} in total. Left unchanged, check by hand: bars {misure}",
     },
     # ---- orchestratore
+    "ingresso_lead_sheet_editor": {
+        "it": "[Ingresso] lead sheet: la melodia e' quella scritta, basso e accompagnamento sono costruiti dalle {n} sigle scritte o corrette nell'editor.",
+        "en": "[Input] lead sheet: the melody is the written one; bass and accompaniment are built from the {n} chords written or corrected in the editor.",
+    },
+    "ingresso_lead_sheet_proposta_accettata": {
+        "it": "[Ingresso] lead sheet SENZA SIGLE: arrangiato con l'armonia proposta dall'arrangiatore ({n} sigle), accettata nell'editor senza modifiche. E' plausibile, non necessariamente quella del brano: correggila nell'editor per un arrangiamento fedele.",
+        "en": "[Input] lead sheet WITHOUT CHORD SYMBOLS: arranged with the harmony proposed by the arranger ({n} chords), accepted in the editor without changes. It is plausible, not necessarily the song's own: correct it in the editor for a faithful arrangement.",
+    },
     "ingresso_lead_sheet": {
         "it": "[Ingresso] lead sheet riconosciuto: la melodia e' quella scritta, basso e accompagnamento sono costruiti dalle {n} sigle del file. Il basso suona la fondamentale di ogni accordo (o la nota dopo la barra, nei rivolti come C/E).",
         "en": "[Input] lead sheet detected: the melody is the written one; bass and accompaniment are built from the {n} chord symbols in the file. The bass plays the root of each chord (or the note after the slash, in inversions such as C/E).",

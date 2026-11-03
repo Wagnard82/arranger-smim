@@ -1468,8 +1468,10 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                 p.mostra_sigle = True
     if sp.tipo == "lead_sheet":
         if sp.sigle:
-            part.report.append(testo("ingresso_lead_sheet", lingua,
-                                     n=len(sp.sigle)))
+            chiave = {"editor": "ingresso_lead_sheet_editor",
+                      "proposta": "ingresso_lead_sheet_proposta_accettata"
+                      }.get(sp.origine_sigle, "ingresso_lead_sheet")
+            part.report.append(testo(chiave, lingua, n=len(sp.sigle)))
         else:
             from .lingua import nota as nome_nota
             tonica, modo = analisi.tonalita_proposta or (0, "maggiore")
