@@ -46,8 +46,25 @@ class Strumento:
 
     def ambito(self, livello: str) -> tuple:
         from .lingua import normalizza_livello
-        return self.estensione.get(normalizza_livello(livello),
-                                   self.estensione["3a Media"])
+        chiave = normalizza_livello(livello)
+        if e_primo_quadrimestre(chiave):
+            return self._ambito_primo_quadrimestre(anno_livello(chiave))
+        return self.estensione.get(chiave, self.estensione["3a Media"])
+
+    def _ambito_primo_quadrimestre(self, anno: str) -> tuple:
+        """
+        Estensione nel 1o quadrimestre: a meta' fra la fine dell'anno prima
+        e la fine di questo (arrotondando verso l'interno). In 1a Media non
+        c'e' un anno prima: l'estensione di fine 1a si accorcia di una 3a
+        maggiore in alto, restando larga almeno una 5a.
+        STIMA da confermare con i docenti di strumento, come il corno.
+        """
+        lo2, hi2 = self.estensione[anno]
+        if anno == "1a Media":
+            return (lo2, max(lo2 + 7, hi2 - 4)) if hi2 - lo2 > 7 else (lo2, hi2)
+        precedente = CHIAVI_ANNO[CHIAVI_ANNO.index(anno) - 1]
+        lo1, hi1 = self.estensione[precedente]
+        return (lo1 + lo2 + 1) // 2, (hi1 + hi2) // 2
 
 
 # --------------------------------------------------------------------------
@@ -212,9 +229,81 @@ LIVELLI: Dict[str, Livello] = {
 }
 
 
+# --------------------------------------------------------------------------
+# Quadrimestri
+# --------------------------------------------------------------------------
+#
+# I limiti di LIVELLI sono quelli di FINE anno (2o quadrimestre). Il 1o
+# quadrimestre e' una via di mezzo fra la fine dell'anno prima e la fine di
+# questo, cosi' lo stesso brano si suona a ottobre e, piu' ricco, a maggio.
+# Le chiavi del 1o quadrimestre sono quelle dell'anno con SUFFISSO_Q1
+# ("2a Media Q1"): le chiavi dell'anno non cambiano. Solo in italiano:
+# l'interfaccia inglese resta sui Grade 1/2/3.
+
+CHIAVI_ANNO = ["1a Media", "2a Media", "3a Media"]
+SUFFISSO_Q1 = " Q1"
+
+LIVELLI_PRIMO_QUADRIMESTRE: Dict[str, Livello] = {
+    # STIMA del 3/11/2026 approvata dall'autore; da confermare in classe
+    "1a Media" + SUFFISSO_Q1: Livello(
+        nome="1a Media" + SUFFISSO_Q1, durata_minima=1.0, salto_massimo=5,
+        alterazioni=False, accordi_max=1, arpeggi=False, sincopi=False,
+        cambi_posizione=False, tastiera_max_semitoni=7, capotasto_max=2,
+        fiato_max=3.0,
+        note="Note singole, minime e semiminime, salti entro la 4a, posizione fissa.",
+    ),
+    "2a Media" + SUFFISSO_Q1: Livello(
+        nome="2a Media" + SUFFISSO_Q1, durata_minima=0.5, salto_massimo=9,
+        alterazioni=True, accordi_max=2, arpeggi=True, sincopi=False,
+        cambi_posizione=False, tastiera_max_semitoni=10, capotasto_max=4,
+        fiato_max=5.0,
+        note="Prime crome e alterazioni, arpeggi semplici, salti entro la 6a.",
+    ),
+    "3a Media" + SUFFISSO_Q1: Livello(
+        nome="3a Media" + SUFFISSO_Q1, durata_minima=0.5, salto_massimo=15,
+        alterazioni=True, accordi_max=4, arpeggi=True, sincopi=True,
+        cambi_posizione=False, tastiera_max_semitoni=13, capotasto_max=7,
+        fiato_max=7.0,
+        note="Crome, sincopi, accordi di quattro note, salti entro la 10a.",
+    ),
+}
+
+
+def e_primo_quadrimestre(chiave: Optional[str]) -> bool:
+    return bool(chiave) and str(chiave).endswith(SUFFISSO_Q1)
+
+
+def anno_livello(chiave: Optional[str]) -> Optional[str]:
+    """La classe senza il quadrimestre: "2a Media Q1" -> "2a Media"."""
+    from .lingua import normalizza_livello
+    if e_primo_quadrimestre(chiave):
+        chiave = chiave[:-len(SUFFISSO_Q1)]
+    return normalizza_livello(chiave)
+
+
+def chiave_quadrimestre(chiave: Optional[str], quadrimestre: int) -> Optional[str]:
+    """La chiave del livello nel quadrimestre dato (1 o 2; 0 = nessuno = 2)."""
+    if chiave is None:
+        return None
+    anno = anno_livello(chiave)
+    if quadrimestre == 1 and anno in CHIAVI_ANNO:
+        return anno + SUFFISSO_Q1
+    return anno
+
+
+def grado_livello(chiave: Optional[str]) -> float:
+    """Per confrontare due livelli: 1a Q1 = 0.5, 1a = 1, 2a Q1 = 1.5, ..."""
+    anno = anno_livello(chiave)
+    g = CHIAVI_ANNO.index(anno) + 1.0 if anno in CHIAVI_ANNO else 3.0
+    return g - 0.5 if e_primo_quadrimestre(chiave) else g
+
+
 def livello(nome: str) -> Livello:
     from .lingua import normalizza_livello
-    return LIVELLI.get(normalizza_livello(nome), LIVELLI["3a Media"])
+    chiave = normalizza_livello(nome)
+    if chiave in LIVELLI_PRIMO_QUADRIMESTRE:
+        return LIVELLI_PRIMO_QUADRIMESTRE[chiave]
+    return LIVELLI.get(chiave, LIVELLI["3a Media"])
 
 
 def livello_parte(livello_parte_: Optional[str],

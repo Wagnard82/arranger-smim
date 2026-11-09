@@ -10,7 +10,7 @@ Scritto su stdlib: nessuna dipendenza esterna, output deterministico.
 from __future__ import annotations
 
 import struct
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 from xml.sax.saxutils import escape
 
 from .modello import Accordo, Evento, Misura, Parte, Partitura
@@ -322,7 +322,8 @@ class EsportatoreMusicXML:
         pid = getattr(parte, "_xml_id", "P1")
         r = [f'  <part id="{pid}">']
         misure = self.p.misure or [Misura(1, 0.0, 4.0)]
-        righi = 2 if parte.righi == 2 else 1
+        # una parte con la riserva (parte jolly) ha un secondo rigo, piccolo
+        righi = 2 if parte.righi == 2 or parte.riserva else 1
 
         for idx, m in enumerate(misure):
             numero = m.numero if not m.anacrusi else 0
@@ -418,20 +419,19 @@ class EsportatoreMusicXML:
              f"        <divisions>{DIV}</divisions>",
              f"        <key><fifths>{armatura}</fifths></key>",
              f"        <time><beats>{m.num}</beats><beat-type>{m.den}</beat-type></time>"]
-        if righi == 2:
+        if righi == 2 and parte.riserva:
+            # rigo 2 = riserva: stessa chiave della parte, piu' piccolo
+            r.append("        <staves>2</staves>")
+            r.append("        " + _chiave_xml(parte, 1))
+            r.append("        " + _chiave_xml(parte, 2))
+            r.append('        <staff-details number="2"><staff-type>cue</staff-type>'
+                     "<staff-size>70</staff-size></staff-details>")
+        elif righi == 2:
             r.append("        <staves>2</staves>")
             r.append('        <clef number="1"><sign>G</sign><line>2</line></clef>')
             r.append('        <clef number="2"><sign>F</sign><line>4</line></clef>')
-        elif parte.chiave == "percussion":
-            r.append("        <clef><sign>percussion</sign><line>2</line></clef>")
-        elif parte.chiave == "F":
-            r.append("        <clef><sign>F</sign><line>4</line></clef>")
-        elif parte.chiave == "C":
-            r.append("        <clef><sign>C</sign><line>3</line></clef>")
         else:
-            r.append("        <clef><sign>G</sign><line>2</line>" +
-                     (f"<clef-octave-change>{parte.ottava_chiave}</clef-octave-change>"
-                      if parte.ottava_chiave else "") + "</clef>")
+            r.append("        " + _chiave_xml(parte))
         if parte.trasposizione:
             crom = parte.trasposizione
             diat = round(crom * 7 / 12)
@@ -466,8 +466,22 @@ class EsportatoreMusicXML:
     # ----------------------------------------------------------------- voce
     def _voce(self, parte: Parte, m: Misura, rigo: int, righi: int) -> List[str]:
         r: List[str] = []
-        eventi = [e for e in parte.eventi if e.rigo == rigo] if righi == 2 else parte.eventi
+        richiamo = bool(parte.riserva) and rigo == 2
+        if parte.riserva:
+            eventi = parte.riserva if rigo == 2 else parte.eventi
+        else:
+            eventi = [e for e in parte.eventi if e.rigo == rigo] if righi == 2 else parte.eventi
         pezzi = self._taglia(eventi, m)
+        if richiamo:
+            # le scritte della riserva: chi manca, e con la staffetta chi
+            # suona la melodia in quel punto
+            for t, scritta in parte.riserva_testi:
+                if m.inizio - 1e-6 <= t < m.fine - 1e-6:
+                    scarto = int(round((t - m.inizio) * DIV))
+                    r.append('      <direction placement="above"><direction-type>'
+                             f"<words>{escape(scritta)}</words></direction-type>"
+                             + (f"<offset>{scarto}</offset>" if scarto else "")
+                             + "<staff>2</staff></direction>")
         # Le sigle si prendono dalla griglia armonica della partitura, non
         # dalle note della parte: cosi' compaiono esattamente dove cambia
         # l'accordo anche se in quel punto la parte tiene una nota o tace
@@ -533,7 +547,8 @@ class EsportatoreMusicXML:
                 trave = next(travi, [])
                 if e.pausa:
                     r.extend(self._nota_xml(None, u, tipo, punti, tm, rigo, righi,
-                                            parte, False, False, None))
+                                            parte, False, False, None,
+                                            richiamo=richiamo))
                 else:
                     for j, altezza in enumerate(sorted(e.altezze)):
                         r.extend(self._nota_xml(
@@ -542,7 +557,7 @@ class EsportatoreMusicXML:
                             legatura_inizio=(legato_dopo and ultimo) or not ultimo,
                             legatura_fine=(legato_prima and k == 0) or k > 0,
                             articolazione=e.articolazione if (k == 0 and j == 0) else None,
-                            trave=trave if j == 0 else None))
+                            trave=trave if j == 0 else None, richiamo=richiamo))
             if chiusura:
                 r.append(chiusura)
         return r
@@ -556,9 +571,14 @@ class EsportatoreMusicXML:
                   tm: Optional[Tuple[int, int]], rigo: int, righi: int, parte: Parte,
                   accordo: bool, legatura_inizio: bool, legatura_fine: bool,
                   articolazione: Optional[str] = None,
-                  trave: Optional[List[Tuple[int, str]]] = None) -> List[str]:
+                  trave: Optional[List[Tuple[int, str]]] = None,
+                  richiamo: bool = False) -> List[str]:
+        """`richiamo`: nota piccola della riserva, che non suona (<cue/>).
+        Lo schema non ammette <tie> nelle note di richiamo: resta <tied>."""
         st = strumento(parte.strumento)
         r = ["      <note>"]
+        if richiamo:
+            r.append("        <cue/>")
         if accordo:
             r.append("        <chord/>")
         if altezza is None:
@@ -581,13 +601,14 @@ class EsportatoreMusicXML:
             r.append(f"          <octave>{ott}</octave>")
             r.append("        </pitch>")
         r.append(f"        <duration>{unita}</duration>")
-        if altezza is not None:
+        if altezza is not None and not richiamo:
             if legatura_fine:
                 r.append('        <tie type="stop"/>')
             if legatura_inizio:
                 r.append('        <tie type="start"/>')
         r.append(f"        <voice>{rigo}</voice>")
-        r.append(f"        <type>{tipo}</type>")
+        r.append(f"        <type size=\"cue\">{tipo}</type>" if richiamo
+                 else f"        <type>{tipo}</type>")
         for _ in range(punti):
             r.append("        <dot/>")
         if tm:
@@ -660,6 +681,19 @@ class EsportatoreMusicXML:
 
 
 
+def _chiave_xml(parte: Parte, numero: Optional[int] = None) -> str:
+    attr = f' number="{numero}"' if numero else ""
+    if parte.chiave == "percussion":
+        return f"<clef{attr}><sign>percussion</sign><line>2</line></clef>"
+    if parte.chiave == "F":
+        return f"<clef{attr}><sign>F</sign><line>4</line></clef>"
+    if parte.chiave == "C":
+        return f"<clef{attr}><sign>C</sign><line>3</line></clef>"
+    return (f"<clef{attr}><sign>G</sign><line>2</line>" +
+            (f"<clef-octave-change>{parte.ottava_chiave}</clef-octave-change>"
+             if parte.ottava_chiave else "") + "</clef>")
+
+
 def _numeri_volta(volte) -> str:
     return ", ".join(str(v) for v in volte) or "1"
 
@@ -725,10 +759,61 @@ def _vlq(n: int) -> bytes:
     return bytes(out)
 
 
-def esporta_midi(part: Partitura, percorso: str, tpq: int = 480) -> str:
+# clic dell'attacco: legnetto acuto sul primo movimento, grave sugli altri
+CLIC_FORTE, CLIC_DEBOLE = 76, 77
+
+
+def durata_attacco(misure: List[Misura], battute: int) -> float:
+    """Quarti di attacco prima della musica, anacrusi compresa."""
+    if battute <= 0 or not misure:
+        return 0.0
+    m = misure[0]
+    return battute * m.durata_piena + (m.durata_piena - m.durata if m.parziale else 0.0)
+
+
+def battute_di_attacco(misure: List[Misura], battute: int) -> List[Tuple[float, bool]]:
+    """
+    I clic che precedono la musica: (istante in quarti, accentato).
+
+    Sono `battute` misure intere del primo metro, piu' la parte di battuta
+    che manca all'anacrusi, cosi' il levare entra a tempo come quando il
+    direttore conta. I clic cadono sui movimenti (semiminima puntata nei
+    tempi composti) e il primo di ogni battuta e' accentato.
+    """
+    durata = durata_attacco(misure, battute)
+    if not durata:
+        return []
+    piena, passo = misure[0].durata_piena, misure[0].unita_movimento
+    clic, t = [], 0.0
+    while t < durata - 1e-6:
+        clic.append((t, abs(t / piena - round(t / piena)) < 1e-6))
+        t += passo
+    return clic
+
+
+def esporta_midi(part: Partitura, percorso: str, tpq: int = 480,
+                 escludi: Iterable[str] = (), velocita: float = 100,
+                 attacco: int = 0) -> str:
+    """
+    MIDI di anteprima. Con i parametri facoltativi diventa la base «meno
+    uno» per lo studio a casa:
+
+    * `escludi`: id delle parti che non suonano (il leggio del ragazzo).
+      Le altre tengono il canale e il timbro che hanno nell'anteprima;
+    * `velocita`: percentuale del tempo del brano. Cambia solo il valore
+      del tempo, le note restano le stesse;
+    * `attacco`: battute di clic prima della musica, su una traccia in piu'.
+
+    Senza i parametri il file e' identico a quello di sempre.
+    """
     tracce = []
+    escluse = set(escludi)
+    clic = battute_di_attacco(part.misure, attacco)
+    # la musica comincia dove finisce l'attacco
+    anticipo = int(round(durata_attacco(part.misure, attacco) * tpq))
     # traccia di tempo
-    usec = int(60_000_000 / max(20.0, part.bpm))
+    bpm = max(20.0, part.bpm) * max(1.0, velocita) / 100.0
+    usec = int(60_000_000 / bpm)
     meta = b"\x00\xff\x51\x03" + usec.to_bytes(3, "big") + b"\x00\xff\x2f\x00"
     tracce.append(meta)
 
@@ -737,6 +822,8 @@ def esporta_midi(part: Partitura, percorso: str, tpq: int = 480) -> str:
     from . import ripetizioni
     srotola = ripetizioni.ha_segni(part.misure)
     for i, p in enumerate(part.parti):
+        if p.id in escluse:
+            continue
         st = strumento(p.strumento)
         canale = 9 if st.percussione else (i % 15) + (1 if i % 15 >= 9 else 0)
         canale = min(15, canale)
@@ -746,8 +833,8 @@ def esporta_midi(part: Partitura, percorso: str, tpq: int = 480) -> str:
         for e in sorgente:
             if e.pausa:
                 continue
-            t0 = int(round(e.inizio * tpq))
-            t1 = max(t0 + 1, int(round(e.fine * tpq)))
+            t0 = anticipo + int(round(e.inizio * tpq))
+            t1 = max(t0 + 1, anticipo + int(round(e.fine * tpq)))
             for a in e.altezze:
                 suono = a
                 eventi.append((t0, 0x90, suono, 78))
@@ -761,6 +848,17 @@ def esporta_midi(part: Partitura, percorso: str, tpq: int = 480) -> str:
             dati += _vlq(max(0, t - prec))
             dati += bytes([tipo | canale, nota & 0x7F, vel])
             prec = t
+        dati += b"\x00\xff\x2f\x00"
+        tracce.append(bytes(dati))
+
+    if clic:
+        dati, prec = bytearray(), 0
+        for t, forte in clic:
+            t0 = int(round(t * tpq))
+            nota = CLIC_FORTE if forte else CLIC_DEBOLE
+            dati += _vlq(t0 - prec) + bytes([0x99, nota, 100 if forte else 80])
+            dati += _vlq(tpq // 8) + bytes([0x89, nota, 0])
+            prec = t0 + tpq // 8
         dati += b"\x00\xff\x2f\x00"
         tracce.append(bytes(dati))
 

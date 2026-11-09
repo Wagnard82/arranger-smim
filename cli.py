@@ -10,15 +10,18 @@ Esempi:
     python cli.py esempi/lead_sheet.xml --organico flauto=1,violino=2 \
         --livello "Grade 2" --livello-strumento violino2=1 --lingua en
 
-    python cli.py "https://youtu.be/XXXX" --organico flauto=1,chitarra=1 --ia
+    # basi «meno uno» per ogni leggio, a velocita' normale e al 75%
+    python cli.py esempi/inno_alla_gioia.xml --organico flauto=2,violino=2 \
+        --basi 100,75
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
-from arranger import Configurazione, esegui
+from arranger import Configurazione, basi, esegui
 from arranger.lingua import LINGUE, normalizza_livello
 from arranger.strumenti import LIVELLI, REGISTRO
 
@@ -103,6 +106,19 @@ def main(argv=None) -> int:
                     help="genera anche il sorgente .ly")
     ap.add_argument("--pdf", action="store_true",
                     help="incide il PDF con LilyPond (richiede l'eseguibile nel PATH)")
+    ap.add_argument("--quadrimestre", type=int, choices=(1, 2), default=0,
+                    help="versione del 1o o del 2o quadrimestre della classe "
+                         "(solo in italiano): lo stesso brano a ottobre e a "
+                         "maggio, con gli stessi ruoli")
+    ap.add_argument("--jolly", action="store_true",
+                    help="parti jolly per le assenze: basso e melodia scritti "
+                         "anche in un rigo piccolo nella parte di un altro "
+                         "strumento, scelto dal motore")
+    ap.add_argument("--basi", metavar="VELOCITA",
+                    help="genera le basi «meno uno» per lo studio a casa: per "
+                         "ogni leggio l'orchestra senza la sua parte, alle "
+                         "velocita' indicate in percento, es. --basi 100,75. "
+                         "MP3 se FluidSynth e' installato, altrimenti MIDI")
     ap.add_argument("-o", "--output", default="output")
     a = ap.parse_args(argv)
 
@@ -126,7 +142,10 @@ def main(argv=None) -> int:
                          silenzio_massimo_misure=max(1, a.pausa_massima),
                          misure_minime_solista=a.misure_minime_solista,
                          debug_originale=a.confronto, usa_ia=a.ia,
-                         modello_ia=a.modello_ia, lingua=a.lingua)
+                         modello_ia=a.modello_ia, lingua=a.lingua,
+                         parti_jolly=a.jolly, quadrimestre=a.quadrimestre)
+    if a.basi:
+        cfg.velocita_basi = basi.velocita_valide(a.basi.split(","))
     scelte = {x.strip() for x in a.ia_funzioni.split(",") if x.strip()}
     for funzione in ("melodia", "riferimenti", "stile", "orchestrazione",
                      "armonia", "relazione"):
@@ -153,6 +172,12 @@ def main(argv=None) -> int:
             print("  -", riga)
     if r.relazione:
         print("\nRelazione didattica (IA):\n" + r.relazione)
+    if a.basi:
+        nome = os.path.basename(r.percorso_xml).replace("_arrangiamento.musicxml", "")
+        b = basi.genera_basi(r.partitura, a.output, nome, cfg.velocita_basi)
+        print(f"\nBasi:     {b.zip}")
+        for riga in b.avvisi:
+            print("  -", riga)
     return 0
 
 

@@ -47,6 +47,11 @@ _ETICHETTE_LIVELLO_BREVI = {
     "it": {"1a Media": "1a Media", "2a Media": "2a Media", "3a Media": "3a Media"},
     "en": {"1a Media": "Grade 1", "2a Media": "Grade 2", "3a Media": "Grade 3"},
 }
+_NOTE_LIVELLO_EN_Q1 = {
+    "1a Media Q1": "Single notes, half and quarter notes, leaps within a 4th, fixed hand position.",
+    "2a Media Q1": "First eighth notes and accidentals, simple arpeggios, leaps within a 6th.",
+    "3a Media Q1": "Eighth notes, syncopation, four-note chords, leaps within a 10th.",
+}
 _NOTE_LIVELLO_EN = {
     "1a Media": "First position, basic rhythms (half and quarter notes), "
                 "two-note chords, leaps within a 5th. Approx. ABRSM/Trinity "
@@ -78,9 +83,22 @@ def normalizza_livello(valore) -> str:
     return s
 
 
+_ETICHETTE_QUADRIMESTRE = {
+    # il 1o quadrimestre si offre solo in italiano; in inglese l'etichetta
+    # serve se arriva da impostazioni salvate in italiano
+    "it": {"lunga": "{anno}, 1° quadrimestre", "breve": "{anno} (1° quadr.)"},
+    "en": {"lunga": "{anno}, first term", "breve": "{anno} (1st term)"},
+}
+
+
 def etichetta_livello(chiave: str, lingua: str = "it", breve: bool = False) -> str:
+    from .strumenti import anno_livello, e_primo_quadrimestre
     tab = (_ETICHETTE_LIVELLO_BREVI if breve else _ETICHETTE_LIVELLO)[valida(lingua)]
     chiave = normalizza_livello(chiave)
+    if e_primo_quadrimestre(chiave):
+        anno = anno_livello(chiave)
+        modello = _ETICHETTE_QUADRIMESTRE[valida(lingua)]["breve" if breve else "lunga"]
+        return modello.format(anno=tab.get(anno, anno))
     return tab.get(chiave, chiave)
 
 
@@ -88,7 +106,7 @@ def note_livello(chiave: str, lingua: str = "it") -> str:
     from .strumenti import livello
     chiave = normalizza_livello(chiave)
     if valida(lingua) == "en":
-        return _NOTE_LIVELLO_EN.get(chiave, "")
+        return _NOTE_LIVELLO_EN.get(chiave, _NOTE_LIVELLO_EN_Q1.get(chiave, ""))
     return livello(chiave).note
 
 
@@ -544,6 +562,60 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
         "it": "[Forma] I segni di ripresa non sono coerenti: l'anteprima suona il brano di seguito, così com'è scritto. I segni restano in partitura.",
         "en": "[Form] The repeat signs are inconsistent: the preview plays the piece straight through, as written. The signs stay in the score.",
     },
+    # ---- parti jolly
+    "riserva_melodia": {
+        "it": "melodia",
+        "en": "melody",
+    },
+    "riserva_scritta": {
+        "it": "Riserva: {linea}",
+        "en": "Cover: {linea}",
+    },
+    "riserva_scritta_melodia": {
+        "it": "Riserva: {linea} ({chi})",
+        "en": "Cover: {linea} ({chi})",
+    },
+    "riserva_fatta": {
+        "it": "[Riserva] {linea}: scritta in piccolo anche nella parte di {chi}, da suonare se manca chi la suona.",
+        "en": "[Cover] {linea}: also written in cue notes in the {chi} part, to be played if its player is absent.",
+    },
+    "riserva_scoperta": {
+        "it": "[Riserva] {linea}: nessuno strumento la puo' coprire nel proprio registro, resta senza riserva.",
+        "en": "[Cover] {linea}: no instrument can cover it in its own range, so it has no cover.",
+    },
+    "riserva_note_tolte": {
+        "it": "[Riserva] {chi}: {n} note della riserva fuori dall'estensione lasciate in pausa.",
+        "en": "[Cover] {chi}: {n} cue notes outside the range left as rests.",
+    },
+    "riserva_dorico": {
+        "it": "[Riserva] I righi di riserva sono in note piccole e non suonano in MuseScore. Dorico li importa a grandezza piena e li fa suonare: rimpicciolirli e metterli in muto a mano.",
+        "en": "[Cover] The cue staves are small and silent in MuseScore. Dorico imports them at full size and plays them: shrink and mute them by hand.",
+    },
+    "riserva_lilypond": {
+        "it": "[Riserva] Il sorgente LilyPond non contiene i righi di riserva: ci sono solo nel MusicXML.",
+        "en": "[Cover] The LilyPond source does not contain the cue staves: they are only in the MusicXML.",
+    },
+    # ---- basi «meno uno»
+    "basi_cartella": {
+        "it": "basi",
+        "en": "backing_tracks",
+    },
+    "basi_senza": {
+        "it": "senza",
+        "en": "without",
+    },
+    "basi_solo_midi": {
+        "it": "[Basi] FluidSynth non e' installato: le basi sono in MIDI (si aprono con un programma di notazione o un lettore MIDI), non in MP3.",
+        "en": "[Backing tracks] FluidSynth is not installed: the tracks are MIDI files (open them in a notation program or a MIDI player), not MP3.",
+    },
+    "basi_mp3_fallite": {
+        "it": "[Basi] Conversione in MP3 non riuscita ({errore}): le basi sono in MIDI.",
+        "en": "[Backing tracks] MP3 conversion failed ({errore}): the tracks are MIDI files.",
+    },
+    "basi_pronte": {
+        "it": "[Basi] {n} basi «meno uno» in {formato}, alle velocita' {velocita}: ogni leggio ha l'orchestra senza la sua parte, con due battute di attacco.",
+        "en": "[Backing tracks] {n} \"minus one\" tracks in {formato}, at {velocita} speed: each player gets the orchestra without their own part, with a two-bar count-in.",
+    },
     "ripresa_legature_tolte": {
         "it": "[Forma] {n} legature di valore dell'originale interrotte a un ritornello o a una volta: le altezze non cambiano.",
         "en": "[Form] {n} ties from the original broken at a repeat or an ending: the pitches do not change.",
@@ -624,6 +696,22 @@ MESSAGGI: Dict[str, Dict[str, str]] = {
     "sottotitolo": {
         "it": "Arrangiamento per orchestra scolastica - {livello} - stile {stile}",
         "en": "Arrangement for school orchestra - {livello} - {stile} style",
+    },
+    "quadrimestre_secondo_etichetta": {
+        "it": "{anno}, 2° quadr.",
+        "en": "{anno} (2nd term)",
+    },
+    "quadrimestre_1": {
+        "it": "[Quadrimestre] Versione del 1° quadrimestre ({livello}): limiti a meta' fra la fine della classe precedente e la fine di questa. I ruoli sono gli stessi della versione del 2° quadrimestre.",
+        "en": "[Term] First-term version ({livello}): limits halfway between the end of the previous grade and the end of this one. The roles are the same as in the second-term version.",
+    },
+    "quadrimestre_1_prima": {
+        "it": "[Quadrimestre] Versione del 1° quadrimestre ({livello}), per chi ha cominciato a ottobre: note singole, salti piccoli, estensione accorciata in alto. I ruoli sono gli stessi della versione del 2° quadrimestre.",
+        "en": "[Term] First-term version ({livello}), for students who started this autumn: single notes, small leaps, range shortened at the top. The roles are the same as in the second-term version.",
+    },
+    "quadrimestre_2": {
+        "it": "[Quadrimestre] Versione del 2° quadrimestre ({livello}, limiti di fine anno). I ruoli sono decisi sui limiti del 1° quadrimestre: ognuno ha la stessa parte della versione di ottobre, piu' ricca.",
+        "en": "[Term] Second-term version ({livello}, end-of-year limits). The roles are decided on the first-term limits: everyone has the same part as in the first-term version, only richer.",
     },
     "sottotitolo_differenziati": {
         "it": " (livelli differenziati)",

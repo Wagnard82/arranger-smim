@@ -26,7 +26,7 @@ from typing import Dict, List, Optional, Tuple
 from .modello import Evento, Misura, Parte, Partitura
 from .lingua import etichetta_livello, nota, ottave
 from .lingua import t as testo
-from .strumenti import (Livello, Strumento, livello, livello_parte,
+from .strumenti import (Livello, Strumento, anno_livello, livello, livello_parte,
                         nome_livello_parte, strumento)
 
 MAGGIORE = [0, 2, 4, 5, 7, 9, 11]
@@ -832,7 +832,7 @@ def avviso_note_scomode(part: Partitura) -> None:
     for p in part.parti:
         st = strumento(p.strumento)
         chiave_liv = nome_livello_parte(p.livello, part.livello)
-        scomode = set(st.note_scomode.get(chiave_liv, ()))
+        scomode = set(st.note_scomode.get(anno_livello(chiave_liv), ()))
         if not scomode:
             continue
         trovate = [(e, a) for e in p.eventi if not e.pausa

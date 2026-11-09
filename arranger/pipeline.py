@@ -9,9 +9,10 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from . import (analizzatore, esportatore, ia, ingestione, interprete,
-               lilypond, orchestratore, richiesta, ripetizioni, tonalita,
-               vincoli)
+               lilypond, orchestratore, richiesta, riserve, ripetizioni,
+               tonalita, vincoli)
 from .lingua import accompagnamento as nome_accompagnamento
+from .lingua import etichetta_livello
 from .lingua import stile as nome_stile
 from .lingua import t as testo
 from .modello import Analisi, Configurazione, Partitura, Spartito, nome_it
@@ -76,6 +77,19 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
             dati = interprete.interpreta(cfg.richiesta, id_parti, cfg.lingua)
         note_ia.extend(richiesta.applica(cfg, dati, id_parti))
 
+    # --- Quadrimestre: la versione di ottobre e quella di maggio dello
+    # stesso brano. I ruoli (e il trasporto consigliato) si decidono sui
+    # limiti del 1o quadrimestre, cosi' sono uguali nelle due versioni.
+    cfg_ruoli = None
+    if cfg.quadrimestre in (1, 2):
+        cfg_ruoli = cfg.al_quadrimestre(1)
+        cfg = cfg_ruoli if cfg.quadrimestre == 1 else cfg.al_quadrimestre(2)
+        chiave_q = f"quadrimestre_{cfg.quadrimestre}"
+        if cfg.quadrimestre == 1 and cfg.livello.startswith("1a Media"):
+            chiave_q = "quadrimestre_1_prima"      # non c'e' una classe prima
+        forma.append(testo(chiave_q, cfg.lingua,
+                           livello=etichetta_livello(cfg.livello, cfg.lingua)))
+
     if cfg.trasporto:
         trasporta(master, cfg.trasporto)
 
@@ -85,7 +99,8 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
     # tonalita' piu' comoda per l'organico: solo un suggerimento nel report,
     # e solo se il docente non ha gia' scelto un trasporto
     if not cfg.trasporto:
-        consiglio_tono = tonalita.suggerisci_trasporto(master, cfg, analisi.melodia)
+        consiglio_tono = tonalita.suggerisci_trasporto(master, cfg_ruoli or cfg,
+                                                     analisi.melodia)
         if consiglio_tono is not None:
             forma.append(consiglio_tono.testo(cfg.lingua))
 
@@ -165,7 +180,8 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
         if piano:
             note_ia.append(testo("ia_staffetta", cfg.lingua))
 
-    partitura = orchestratore.arrangia(master, analisi, cfg, piano_melodia=piano)
+    partitura = orchestratore.arrangia(master, analisi, cfg, piano_melodia=piano,
+                                      cfg_ruoli=cfg_ruoli)
     report = forma + vincoli.valida(partitura, analisi.melodia, master.note)
 
     if cfg.debug_originale:
@@ -177,6 +193,13 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
     interrotte = ripetizioni.taglia_ai_confini(partitura)
     if interrotte:
         report.append(testo("ripresa_legature_tolte", cfg.lingua, n=interrotte))
+
+    # parti jolly: dopo i vincoli e i tagli, cosi' le riserve copiano le
+    # note finali
+    if cfg.parti_jolly:
+        report.extend(riserve.aggiungi_riserve(partitura, analisi, cfg.lingua))
+        if any(p.riserva for p in partitura.parti):
+            report.append(testo("riserva_dorico", cfg.lingua))
 
     # --- Modulo 4
     base = nome_base or _slug(master.titolo)
@@ -191,6 +214,8 @@ def esegui(sorgente: str, cfg: Configurazione, cartella: str = "output",
     if esporta_ly or incidi_pdf:
         ly_path = os.path.join(cartella, f"{base}_arrangiamento.ly")
         lilypond.esporta_lilypond(partitura, ly_path)
+        if any(p.riserva for p in partitura.parti):
+            report.append(testo("riserva_lilypond", cfg.lingua))
         if incidi_pdf:
             try:
                 pdf_path = lilypond.incidi_pdf(ly_path, cartella)

@@ -295,6 +295,12 @@ class Parte:
     # limiti per rigo: la destra non scende in cantina, la sinistra non sale
     variante: int = 0             # indice del diviso: differenzia le scritture
                                   # fra Pianoforte 1 e 2, Chitarra 1 e 2, ecc.
+    riserva: List[Evento] = field(default_factory=list)
+    # Parti jolly (`riserve.py`): la copia di un'altra linea (basso o
+    # melodia) da suonare se manca chi la suona. Si scrive in un rigo piccolo
+    # sotto quello della parte e non suona mai.
+    riserva_testi: List[Tuple[float, str]] = field(default_factory=list)
+    # scritte del rigo di riserva: (istante, testo), es. «Riserva: Violoncello»
     livello: Optional[str] = None
     # Livello didattico di QUESTA parte. None = si usa quello della
     # partitura. Serve alle classi eterogenee, che sono la norma piu' che
@@ -390,6 +396,19 @@ class Configurazione:
     # interpretata; {} = interpretata, niente da cambiare. Nelle impostazioni
     # salvate i parametri sono gia' modificati: rigenerando, il modello non
     # viene richiamato e l'arrangiamento e' lo stesso.
+    quadrimestre: int = 0
+    # 0 = nessuno (i limiti di fine anno, come prima); 1 o 2 = versione del
+    # 1o o del 2o quadrimestre della classe, per suonare lo stesso brano a
+    # ottobre e a maggio. Con 1 o 2 i ruoli si decidono SEMPRE sui limiti
+    # del 1o quadrimestre, cosi' le due versioni danno a ognuno la stessa
+    # parte. Solo nell'interfaccia italiana.
+    parti_jolly: bool = False
+    # Riserve per le assenze: basso e melodia scritti in piccolo nella parte
+    # di un altro strumento (`riserve.py`). Spente, la partitura non cambia.
+    velocita_basi: List[int] = field(default_factory=lambda: [100, 75])
+    # Percentuali del tempo per le basi «meno uno» (`basi.py`): ogni leggio
+    # riceve un file per ciascuna. Il docente le sceglie, per esempio 60 e
+    # 80 per un passaggio difficile nei primi giorni di studio.
     lingua: str = "it"
     # "it" o "en": cambia SOLO come le cose si chiamano (nomi delle parti,
     # report, didascalie della partitura, testi dell'IA). Le scelte musicali
@@ -404,6 +423,24 @@ class Configurazione:
         self.livelli_strumenti = {k: normalizza_livello(v)
                                   for k, v in self.livelli_strumenti.items()}
         self.lingua = valida(self.lingua)
+        try:
+            self.quadrimestre = int(self.quadrimestre or 0)
+        except (TypeError, ValueError):
+            self.quadrimestre = 0
+        if self.quadrimestre not in (0, 1, 2):
+            self.quadrimestre = 0
+
+    def al_quadrimestre(self, quadrimestre: int) -> "Configurazione":
+        """
+        Una copia con i livelli (classe, strumenti, leggii) portati al
+        quadrimestre dato: 1 -> chiavi "... Q1", 2 -> chiavi dell'anno.
+        """
+        from dataclasses import replace
+        from .strumenti import chiave_quadrimestre
+        return replace(
+            self, livello=chiave_quadrimestre(self.livello, quadrimestre),
+            livelli_strumenti={k: chiave_quadrimestre(v, quadrimestre)
+                               for k, v in self.livelli_strumenti.items()})
 
     def ia_attiva(self, funzione: str) -> bool:
         return self.usa_ia and bool(getattr(self, f"ia_{funzione}", False))

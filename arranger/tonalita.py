@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple
 from .esportatore import fifths_scritti
 from .lingua import nome_strumento, t
 from .modello import Configurazione, Nota, Spartito
-from .strumenti import strumento
+from .strumenti import anno_livello, strumento
 
 # alterazioni in chiave che un leggio regge senza fatica, per livello.
 # 1a Media: 2, confermato dal docente il 2/11/2026 (con 1 l'Inno in Do
@@ -140,7 +140,7 @@ def suggerisci_trasporto(sp: Spartito, cfg: Configurazione,
             f = fifths_scritti(reali, p.trasposizione)
             scritte.append(f)
             n = abs(f) * (PESO_BEMOLLI.get(st.famiglia, 1.0) if f < 0 else 1.0)
-            oltre = max(0.0, n - TOLLERANZA.get(liv, 4))
+            oltre = max(0.0, n - TOLLERANZA.get(anno_livello(liv), 4))
             punti += PESO_FAMIGLIA.get(st.famiglia, 1.0) * (3.0 * oltre * oltre + 0.2 * n)
             if "melodia" in st.ruoli:
                 melodici += 1

@@ -24,8 +24,8 @@ from .lingua import abbrev_strumento, etichetta_livello, nome_parte_da_id
 from .lingua import nota as nome_nota
 from .lingua import stile as nome_stile
 from .lingua import t as testo
-from .strumenti import (ORDINE_PARTITURA, PERC_MIDI, Strumento, livello,
-                        nomi_parti, strumento)
+from .strumenti import (ORDINE_PARTITURA, PERC_MIDI, Strumento, grado_livello,
+                        livello, nomi_parti, strumento)
 
 # --------------------------------------------------------------------------
 # Utilita' armoniche
@@ -1348,7 +1348,8 @@ def _puo_cedere(primo: Parte, secondo: Parte, cfg: Configurazione) -> bool:
     come solista."""
     if secondo.id in (cfg.strumenti_melodia or []):
         return False
-    return (primo.livello or cfg.livello) >= (secondo.livello or cfg.livello)
+    return (grado_livello(primo.livello or cfg.livello)
+            >= grado_livello(secondo.livello or cfg.livello))
 
 
 def melodia_ai_primi_leggii(parti: List[Parte], cfg: Configurazione) -> List[str]:
@@ -1400,10 +1401,20 @@ def staffetta_ai_primi_leggii(staffetta: Dict[int, List[str]], parti: List[Parte
 
 
 def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
-             piano_melodia: Optional[Dict[int, List[str]]] = None) -> Partitura:
+             piano_melodia: Optional[Dict[int, List[str]]] = None,
+             cfg_ruoli: Optional[Configurazione] = None) -> Partitura:
+    """
+    `cfg_ruoli`: se c'e', i ruoli e la staffetta si decidono sui SUOI
+    livelli (il 1o quadrimestre), la scrittura sui livelli di `cfg`. Cosi'
+    la versione di maggio da' a ognuno la stessa parte di quella di ottobre.
+    """
     parti = costruisci_parti(cfg)
+    cr = cfg_ruoli or cfg
+    if cfg_ruoli is not None:
+        for p, q in zip(parti, costruisci_parti(cfg_ruoli)):
+            p.livello = q.livello
     tonalita = misure[0].tonalita if (misure := sp.misure) else 0
-    resoconto_ruoli = assegna_ruoli_stabili(parti, analisi, cfg, tonalita)
+    resoconto_ruoli = assegna_ruoli_stabili(parti, analisi, cr, tonalita)
     L = livello(cfg.livello)
     misure = sp.misure
     inizio = misure[0].inizio if misure else 0.0
@@ -1416,7 +1427,7 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                 p.ruolo = "melodia"
             elif p.ruolo == "melodia":
                 p.ruolo = "controcanto"
-    resoconto_ruoli.extend(melodia_ai_primi_leggii(parti, cfg))
+    resoconto_ruoli.extend(melodia_ai_primi_leggii(parti, cr))
     # la figurazione originale si conserva dalla 2a media in su: in 1a i
     # valori brevi e i salti degli arpeggi non sono ancora alla portata
     usa_figurazione = (livello(cfg.livello).durata_minima <= 0.5
@@ -1438,8 +1449,12 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                 voci_assegnate[p_c.id] = voci_interne[i]
 
     staffetta = piano_melodia or pianifica_staffetta(
-        parti, analisi, cfg, tonalita, set(_climax(analisi)), misure)
-    frasi_ai_primi = staffetta_ai_primi_leggii(staffetta, parti, cfg)
+        parti, analisi, cr, tonalita, set(_climax(analisi)), misure)
+    frasi_ai_primi = staffetta_ai_primi_leggii(staffetta, parti, cr)
+    if cfg_ruoli is not None:
+        # ruoli decisi: da qui si scrive sui livelli del quadrimestre scelto
+        for p, q in zip(parti, costruisci_parti(cfg)):
+            p.livello = q.livello
     if piano_melodia:
         for ids in piano_melodia.values():
             for i in ids:
@@ -1454,8 +1469,10 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                      swing=(cfg.stile == "Jazz"), parti=parti,
                      armonia=list(analisi.armonia), lingua=cfg.lingua)
     lingua = cfg.lingua
-    part.sottotitolo = testo("sottotitolo", lingua,
-                             livello=etichetta_livello(cfg.livello, lingua, breve=True),
+    etichetta = etichetta_livello(cfg.livello, lingua, breve=True)
+    if cfg.quadrimestre == 2:
+        etichetta = testo("quadrimestre_secondo_etichetta", lingua, anno=etichetta)
+    part.sottotitolo = testo("sottotitolo", lingua, livello=etichetta,
                              stile=nome_stile(cfg.stile, lingua))
     if sp.sigle:
         # Le sigle SCRITTE nel file sono un dato certo: chi suona il
@@ -1610,9 +1627,9 @@ def arrangia(sp: Spartito, analisi: Analisi, cfg: Configurazione,
                     ev.extend(accordi_su_ritmo(sotto, st, liv_p, ritmo_ch,
                                                arpeggia=True))
                 else:
-                    passo_arp = 1.0 if liv_p == "1a Media" else 0.5
+                    passo_arp = 1.0 if grado_livello(liv_p) <= 1 else 0.5
                     if mis_sub and mis_sub[0].composto:
-                        passo_arp = 1.5 if liv_p == "1a Media" else 0.5
+                        passo_arp = 1.5 if grado_livello(liv_p) <= 1 else 0.5
                     ev.extend(arpeggio(sotto, st, liv_p, passo=passo_arp))
 
             elif p.strumento == "pianoforte":

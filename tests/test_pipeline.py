@@ -4406,6 +4406,329 @@ def test_esegui_con_sigle(inno):
              f"proposta accettata: l'avvertenza resta ({[m for m in acc.report if m.startswith('[Ingresso]')]})")
 
 
+def _leggi_midi(percorso):
+    """Legge un MIDI di tipo 1: (microsecondi per quarto, tick per quarto,
+    per traccia l'elenco delle note accese come (tick, nota, canale))."""
+    import struct
+    dati = open(percorso, "rb").read()
+    tpq = struct.unpack(">H", dati[12:14])[0]
+    pos, tempo, tracce = 14, None, []
+    while pos < len(dati):
+        lung = struct.unpack(">I", dati[pos + 4:pos + 8])[0]
+        corpo, pos = dati[pos + 8:pos + 8 + lung], pos + 8 + lung
+        i, tick, note, stato = 0, 0, [], 0
+        while i < len(corpo):
+            delta = 0
+            while True:
+                b = corpo[i]; i += 1
+                delta = (delta << 7) | (b & 0x7F)
+                if not b & 0x80:
+                    break
+            tick += delta
+            if corpo[i] == 0xFF:
+                tipo, n = corpo[i + 1], corpo[i + 2]
+                if tipo == 0x51:
+                    tempo = int.from_bytes(corpo[i + 3:i + 6], "big")
+                i += 3 + n
+                continue
+            stato = corpo[i]; i += 1
+            if stato & 0xF0 in (0xC0, 0xD0):
+                i += 1
+                continue
+            nota, vel = corpo[i], corpo[i + 1]; i += 2
+            if stato & 0xF0 == 0x90 and vel > 0:
+                note.append((tick, nota, stato & 0x0F))
+        tracce.append(note)
+    return tempo, tpq, tracce[1:]
+
+
+def test_midi_meno_uno(inno, sei_ottavi):
+    """Il MIDI «meno uno»: senza un leggio, piu' lento, con le battute di
+    attacco. Le note delle altre parti restano quelle dell'anteprima."""
+    out = os.path.join(QUI, "_out")
+    cfg = Configurazione(formazione={"flauto": 2, "clarinetto": 1, "violino": 2,
+                                     "violoncello": 1, "pianoforte": 1})
+    r = esegui(inno, cfg, cartella=out, nome_base="meno_uno")
+    part = r.partitura
+    tempo0, tpq, tracce0 = _leggi_midi(r.percorso_midi)
+    # senza i parametri nuovi il file non cambia
+    uguale = os.path.join(out, "meno_uno_uguale.mid")
+    esportatore.esporta_midi(part, uguale)
+    verifica(open(uguale, "rb").read() == open(r.percorso_midi, "rb").read(),
+             "senza parametri il MIDI di anteprima e' identico")
+
+    ids = [p.id for p in part.parti]
+    via = ids[0]
+    f = os.path.join(out, "meno_uno_senza.mid")
+    esportatore.esporta_midi(part, f, escludi=[via], attacco=0)
+    tempo, _, tracce = _leggi_midi(f)
+    verifica(len(tracce) == len(ids) - 1, f"una traccia in meno: {len(tracce)}")
+    verifica(tracce == tracce0[1:], "le altre parti identiche, stessi canali")
+    verifica(tempo == tempo0, "velocita' normale: tempo invariato")
+
+    f = os.path.join(out, "meno_uno_75.mid")
+    esportatore.esporta_midi(part, f, escludi=[via], velocita=75, attacco=0)
+    tempo, _, tracce = _leggi_midi(f)
+    verifica(abs(tempo - tempo0 / 0.75) <= 2, f"al 75% il quarto dura di piu': {tempo} vs {tempo0}")
+    verifica(tracce == tracce0[1:], "al 75% le note non cambiano")
+
+    # inno: 4/4 con anacrusi di un quarto. Due battute di clic e i tre quarti
+    # che mancano all'anacrusi: la musica entra al quarto 11
+    f = os.path.join(out, "meno_uno_attacco.mid")
+    esportatore.esporta_midi(part, f, escludi=[via], attacco=2)
+    _, _, tracce = _leggi_midi(f)
+    clic = tracce[-1]
+    verifica([t // tpq for t, _, _ in clic] == list(range(11)),
+             f"clic sui movimenti fino all'anacrusi: {[t / tpq for t, _, _ in clic]}")
+    verifica(all(c == 9 for _, _, c in clic), "clic sul canale delle percussioni")
+    forti = [t // tpq for t, n, _ in clic if n == 76]
+    verifica(forti == [0, 4, 8], f"accento sul primo movimento di ogni battuta: {forti}")
+    spostate = [[(t + 11 * tpq, n, c) for t, n, c in tr] for tr in tracce0[1:]]
+    verifica(tracce[:-1] == spostate, "la musica entra dopo l'attacco, a tempo")
+    primo = min(t for tr in tracce[:-1] for t, _, _ in tr)
+    verifica(primo == 11 * tpq, f"l'anacrusi parte al quarto 11: {primo / tpq}")
+
+    # 6/8 con anacrusi di una croma: movimento di semiminima puntata
+    s = esegui(sei_ottavi, Configurazione(formazione={"flauto": 1, "violino": 1,
+               "pianoforte": 1}), cartella=out, nome_base="meno_uno_68")
+    f = os.path.join(out, "meno_uno_68.mid")
+    esportatore.esporta_midi(s.partitura, f, escludi=[s.partitura.parti[0].id], attacco=2)
+    _, tpq, tracce = _leggi_midi(f)
+    verifica([t / tpq for t, _, _ in tracce[-1]] == [0, 1.5, 3, 4.5, 6, 7.5],
+             f"6/8: clic sulle semiminime puntate {[t / tpq for t, _, _ in tracce[-1]]}")
+    primo = min(t for tr in tracce[:-1] for t, _, _ in tr)
+    verifica(primo == int(8.5 * tpq), f"6/8: l'anacrusi entra a 8.5 quarti ({primo / tpq})")
+
+
+def test_basi_meno_uno(inno):
+    """Una base per leggio e per velocita', nello ZIP. Senza sintetizzatore
+    restano i MIDI e il report lo dice; con FluidSynth escono gli MP3."""
+    import zipfile
+    from arranger import basi
+    out = os.path.join(QUI, "_out", "basi")
+    cfg = Configurazione(formazione={"flauto": 2, "clarinetto": 1, "violino": 2,
+                                     "violoncello": 1, "pianoforte": 1})
+    verifica(cfg.velocita_basi == [100, 75], f"velocita' predefinite {cfg.velocita_basi}")
+    verifica(basi.velocita_valide([60, 80, 60, 300, 5, "x"]) == [60, 80, 150, 25],
+             f"velocita' ripulite {basi.velocita_valide([60, 80, 60, 300, 5, 'x'])}")
+    verifica(basi.velocita_valide([]) == [100], "senza velocita': quella normale")
+    r = esegui(inno, cfg, cartella=out, nome_base="inno")
+    part = r.partitura
+    b = basi.genera_basi(part, out, "inno", velocita=[100, 60], sintetizzatore=None)
+    verifica(b.formato == "mid", "senza sintetizzatore: MIDI")
+    verifica(len(b.file) == 2 * len(part.parti), f"una base per leggio e velocita': {len(b.file)}")
+    nomi = sorted(os.path.basename(x) for x in b.file)
+    verifica("inno_senza_Flauto_1_60.mid" in nomi and "inno_senza_Pianoforte_100.mid" in nomi,
+             f"nomi dei file: {nomi[:4]}")
+    verifica(any("MIDI" in a for a in b.avvisi), f"il report dice che sono MIDI: {b.avvisi}")
+    with zipfile.ZipFile(b.zip) as z:
+        verifica(sorted(z.namelist()) == nomi, "lo ZIP contiene tutte le basi")
+    for p in part.parti:
+        f = next(x for x in b.file if f"_senza_{p.nome.replace(' ', '_')}_100" in x)
+        _, _, tracce = _leggi_midi(f)
+        verifica(len(tracce) == len(part.parti), f"{p.nome}: tolto solo il suo leggio")
+    # in inglese cambiano solo i nomi dei file
+    en = esegui(inno, Configurazione(formazione=cfg.formazione, lingua="en"),
+                cartella=out, nome_base="inno_en")
+    b_en = basi.genera_basi(en.partitura, out, "inno_en", velocita=[100],
+                            sintetizzatore=None, lingua="en")
+    verifica(all("_without_" in x for x in b_en.file), f"nomi in inglese {b_en.file[:1]}")
+    verifica(any("MIDI" in a for a in b_en.avvisi), "avviso in inglese")
+
+    s = basi.trova_sintetizzatore()
+    if s is None:
+        print("   (FluidSynth non installato: prova degli MP3 saltata)")
+        return
+    corto = esegui(inno, Configurazione(formazione={"flauto": 1, "pianoforte": 1}),
+                   cartella=out, nome_base="mp3")
+    b = basi.genera_basi(corto.partitura, out, "mp3", velocita=[100], sintetizzatore=s)
+    verifica(b.formato == "mp3" and len(b.file) == 2, f"MP3 generati: {b.file}")
+    for x in b.file:
+        testa = open(x, "rb").read(3)
+        verifica(x.endswith(".mp3") and (testa == b"ID3" or testa[0] == 0xFF)
+                 and os.path.getsize(x) > 10_000, f"MP3 valido: {x}")
+    verifica(not [x for x in os.listdir(os.path.dirname(b.file[0])) if x.endswith(".wav")],
+             "nessun WAV lasciato")
+
+
+def test_quadrimestri(inno, canzone):
+    """Lo stesso brano a ottobre e a maggio: il 1o quadrimestre e' una via
+    di mezzo, il 2o sono i limiti di oggi, e i ruoli sono gli stessi."""
+    from arranger.strumenti import (anno_livello, chiave_quadrimestre,
+                                    grado_livello, livello as regole)
+    from arranger.lingua import etichetta_livello, normalizza_livello
+    from arranger.riserve import turni_melodia
+    verifica(normalizza_livello("2a Media Q1") == "2a Media Q1"
+             and anno_livello("2a Media Q1") == "2a Media"
+             and chiave_quadrimestre("Grade 2", 1) == "2a Media Q1"
+             and chiave_quadrimestre("2a Media Q1", 2) == "2a Media",
+             "chiavi del quadrimestre")
+    gradi = [grado_livello(k) for k in ("1a Media Q1", "1a Media", "2a Media Q1",
+                                        "2a Media", "3a Media Q1", "3a Media")]
+    verifica(gradi == sorted(gradi) and len(set(gradi)) == 6, f"ordine dei livelli {gradi}")
+    for anno, prima in (("1a Media", None), ("2a Media", "1a Media"), ("3a Media", "2a Media")):
+        q1, q2 = regole(anno + " Q1"), regole(anno)
+        verifica(q1.durata_minima >= q2.durata_minima and q1.salto_massimo <= q2.salto_massimo
+                 and q1.accordi_max <= q2.accordi_max and q1.fiato_max <= q2.fiato_max
+                 and q1.tastiera_max_semitoni <= q2.tastiera_max_semitoni,
+                 f"{anno}: il 1o quadrimestre non chiede piu' del 2o")
+        for k in REGISTRO:
+            st = strumento(k)
+            lo1, hi1 = st.ambito(anno + " Q1")
+            lo2, hi2 = st.ambito(anno)
+            verifica(lo2 <= lo1 <= hi1 <= hi2, f"{k} {anno}: ambito del 1o quadr. dentro il 2o")
+            if prima:
+                lo0, hi0 = st.ambito(prima)
+                verifica(lo1 <= lo0 and hi1 >= hi0,
+                         f"{k} {anno}: ambito del 1o quadr. contiene la classe prima")
+    verifica(etichetta_livello("2a Media Q1") == "2a Media, 1° quadrimestre"
+             and etichetta_livello("2a Media Q1", "en", breve=True) == "Grade 2 (1st term)",
+             "etichette del quadrimestre")
+    cfg = Configurazione(formazione={"violino": 2}, livello="2a Media",
+                         livelli_strumenti={"violino2": "3a Media"}, quadrimestre=1)
+    verifica(cfg.al_quadrimestre(1).livelli_strumenti == {"violino2": "3a Media Q1"}
+             and cfg.al_quadrimestre(1).livello == "2a Media Q1",
+             "anche i livelli dei leggii vanno al quadrimestre")
+    verifica(Configurazione(quadrimestre="7").quadrimestre == 0, "quadrimestre non valido = nessuno")
+
+    out = os.path.join(QUI, "_out")
+    org = {"flauto": 2, "clarinetto": 1, "tromba": 1, "violino": 2,
+           "violoncello": 1, "pianoforte": 1}
+    for brano, nome in ((inno, "inno"), (canzone, "canzone")):
+        for anno in ("1a Media", "2a Media"):
+            r = {q: esegui(brano, Configurazione(formazione=org, livello=anno, quadrimestre=q),
+                           cartella=out, nome_base=f"quad_{nome}_{q}")
+                 for q in (0, 1, 2)}
+            musica = lambda x: [(p.id, e.inizio, e.durata, e.altezze)
+                                for p in x.partitura.parti for e in p.eventi]
+            ruoli = lambda x: [(p.id, p.ruolo) for p in x.partitura.parti]
+            # chi accompagna (pianoforte, chitarra) a maggio ha accordi piu'
+            # pieni e tocca piu' note della melodia: non e' un cambio di ruolo
+            turni = lambda x: [[p.id for p in chi if p.ruolo != "armonia"]
+                               for _a, _b, chi in turni_melodia(x.partitura, x.analisi)]
+            verifica(ruoli(r[1]) == ruoli(r[2]), f"{nome} {anno}: stessi ruoli nei due quadrimestri")
+            verifica(turni(r[1]) == turni(r[2]), f"{nome} {anno}: stessa staffetta nei due quadrimestri")
+            verifica(r[1].partitura.livello == anno + " Q1" and r[2].partitura.livello == anno,
+                     f"{nome} {anno}: livello della partitura")
+            verifica(any(m.startswith("[Quadrimestre]") for m in r[1].report)
+                     and any(m.startswith("[Quadrimestre]") for m in r[2].report)
+                     and not any(m.startswith("[Quadrimestre]") for m in r[0].report),
+                     f"{nome} {anno}: il report dice il quadrimestre")
+            verifica("2° quadr." in r[2].partitura.sottotitolo
+                     and "1° quadr." in r[1].partitura.sottotitolo,
+                     f"{nome} {anno}: il sottotitolo dice il quadrimestre")
+            for p in r[1].partitura.parti:
+                if p.ruolo == "melodia" or strumento(p.strumento).percussione:
+                    continue
+                lo, hi = strumento(p.strumento).ambito(p.livello or r[1].partitura.livello)
+                fuori = [a for e in p.eventi if not e.letterale for a in e.altezze
+                         if not lo <= a <= hi]
+                verifica(not fuori, f"{nome} {anno}: {p.nome} nell'ambito del 1o quadr. ({fuori[:4]})")
+            if anno == "1a Media":
+                verifica(musica(r[1]) != musica(r[2]), f"{nome}: ottobre e maggio sono diversi")
+        # la lingua non cambia la musica, nemmeno nel 1o quadrimestre
+        it = esegui(brano, Configurazione(formazione=org, quadrimestre=1), cartella=out,
+                    nome_base=f"quad_it_{nome}")
+        en = esegui(brano, Configurazione(formazione=org, quadrimestre=1, lingua="en"),
+                    cartella=out, nome_base=f"quad_en_{nome}")
+        verifica(musica(it) == musica(en), f"{nome}: 1o quadrimestre uguale in IT e in EN")
+
+
+def test_parti_jolly(inno, canzone):
+    """Parti jolly: il basso e la melodia hanno una riserva in un rigo
+    piccolo di un altro strumento. Non suonano e non toccano la musica."""
+    out = os.path.join(QUI, "_out")
+    org = {"flauto": 2, "clarinetto": 1, "tromba": 1, "violino": 2,
+           "violoncello": 1, "pianoforte": 1}
+    for brano, nome in ((inno, "inno"), (canzone, "canzone")):
+        r0 = esegui(brano, Configurazione(formazione=org), cartella=out,
+                    nome_base=f"jolly_no_{nome}")
+        r1 = esegui(brano, Configurazione(formazione=org, parti_jolly=True),
+                    cartella=out, nome_base=f"jolly_{nome}")
+        verifica(not any(p.riserva for p in r0.partitura.parti), "spente: nessuna riserva")
+        musica = lambda r: [(p.id, e.inizio, e.durata, e.altezze)
+                            for p in r.partitura.parti for e in p.eventi]
+        verifica(musica(r0) == musica(r1), f"{nome}: le riserve non cambiano la musica")
+        verifica(open(r0.percorso_midi, "rb").read() == open(r1.percorso_midi, "rb").read(),
+                 f"{nome}: le riserve non suonano nel MIDI")
+        coperti = [p for p in r1.partitura.parti if p.riserva]
+        verifica(1 <= len(coperti) <= 2, f"{nome}: una o due riserve ({[p.nome for p in coperti]})")
+        for p in coperti:
+            verifica(p.righi == 1 and p.strumento not in ("pianoforte", "chitarra")
+                     and not strumento(p.strumento).percussione,
+                     f"{nome}: copre solo uno strumento a un rigo ({p.nome})")
+            lo, hi = strumento(p.strumento).ambito(p.livello or "1a Media")
+            fuori = [a for e in p.riserva for a in e.altezze if not lo <= a <= hi]
+            verifica(not fuori, f"{nome}: riserva di {p.nome} nell'estensione ({fuori[:4]})")
+            prima_nota = min(e.inizio for e in p.riserva if not e.pausa)
+            verifica(p.riserva_testi and p.riserva_testi[0][0] <= prima_nota + 1e-6
+                     and not any(not e.pausa for e in p.riserva
+                                 if e.inizio < p.riserva_testi[0][0] - 1e-6),
+                     f"{nome}: scritta prima della prima nota ({p.riserva_testi[:1]}, {prima_nota})")
+            fine = r1.partitura.misure[-1].fine
+            verifica(abs(sum(e.durata for e in p.riserva) - (fine - r1.partitura.misure[0].inizio)) < 1e-6,
+                     f"{nome}: la riserva di {p.nome} copre tutto il brano, pause comprese")
+
+        basso = next((p for p in r1.partitura.parti
+                      if p.ruolo == "basso" and p.strumento != "pianoforte"), None)
+        if basso is not None:
+            chi = [p for p in coperti if basso.nome in p.riserva_testi[0][1]]
+            verifica(len(chi) == 1 and chi[0] is not basso,
+                     f"{nome}: il basso ({basso.nome}) ha una riserva su un altro strumento")
+            if chi:
+                suonate = {(e.inizio, e.durata): e.altezze for e in basso.eventi if not e.pausa}
+                for fr in r1.analisi.frasi or [(0.0, fine)]:
+                    scarti = {a - b for e in chi[0].riserva if not e.pausa
+                              and fr[0] - 1e-6 <= e.inizio < fr[1] - 1e-6
+                              for a, b in zip(e.altezze, suonate.get((e.inizio, e.durata), [None]))
+                              if b is not None}
+                    verifica(len(scarti) <= 1 and all(x % 12 == 0 for x in scarti),
+                             f"{nome}: riserva del basso = basso spostato d'ottava per frase ({scarti})")
+                copiate = [e for e in chi[0].riserva if not e.pausa]
+                verifica(copiate and all((e.inizio, e.durata) in suonate for e in copiate),
+                         f"{nome}: la riserva del basso ha i ritmi del basso")
+        verifica(any("elodia" in p.riserva_testi[0][1] for p in coperti),
+                 f"{nome}: c'e' la riserva della melodia ({[p.riserva_testi[0] for p in coperti]})")
+        verifica(any(m.startswith("[Riserva]") for m in r1.report),
+                 f"{nome}: il report dice chi copre chi")
+        verifica(any("Dorico" in m for m in r1.report),
+                 f"{nome}: il report ricorda di rimpicciolire i righi in Dorico")
+
+        # MusicXML: rigo 2 piccolo, note di richiamo, battute giuste
+        radice = ET.parse(r1.percorso_xml).getroot()
+        nomi = {sp.get("id"): sp.findtext("part-name") for sp in radice.iter("score-part")}
+        for parte in radice.findall("part"):
+            p = next(x for x in r1.partitura.parti if x.nome == nomi[parte.get("id")])
+            if not p.riserva:
+                verifica(not list(parte.iter("staff-details")),
+                         f"{p.nome}: nessun rigo di riserva")
+                continue
+            primo = parte.find("measure/attributes")
+            verifica(primo.findtext("staves") == "2", f"{p.nome}: due righi")
+            det = primo.find("staff-details")
+            verifica(det is not None and det.get("number") == "2"
+                     and det.findtext("staff-type") == "cue", f"{p.nome}: rigo 2 di richiamo")
+            for misura in parte.findall("measure"):
+                m = next(x for x in r1.partitura.misure
+                         if str(x.numero if not x.anacrusi else 0) == misura.get("number"))
+                note2 = [n for n in misura.findall("note") if n.findtext("staff") == "2"]
+                durata = sum(int(n.findtext("duration")) for n in note2
+                             if n.find("chord") is None)
+                verifica(durata == int(round(m.durata * esportatore.DIV)),
+                         f"{p.nome} mis. {m.numero}: rigo 2 lungo {durata}")
+                verifica(all(n.find("cue") is not None and n.find("tie") is None
+                             for n in note2), f"{p.nome} mis. {m.numero}: note di richiamo")
+            verifica(all(n.find("cue") is None for n in parte.iter("note")
+                         if n.findtext("staff") == "1"), f"{p.nome}: rigo 1 normale")
+
+        # in inglese le stesse riserve
+        r_en = esegui(brano, Configurazione(formazione=org, parti_jolly=True, lingua="en"),
+                      cartella=out, nome_base=f"jolly_en_{nome}")
+        riserve = lambda r: [(p.id, e.inizio, e.altezze) for p in r.partitura.parti
+                             for e in p.riserva]
+        verifica(riserve(r1) == riserve(r_en), f"{nome}: stesse riserve IT/EN")
+
+
 if __name__ == "__main__":
     test_interfaccia_completa()
     test_lead_sheet_riconosciuto()
@@ -4428,6 +4751,10 @@ if __name__ == "__main__":
      seconda, inciso, canzone, intro, arpeggiata_mel, sotto_accordi,
      sigle_68, voce_piano) = prepara()
     es = prepara_ripresa(inno)
+    test_midi_meno_uno(inno, sei_ottavi)
+    test_basi_meno_uno(inno)
+    test_parti_jolly(inno, canzone)
+    test_quadrimestri(inno, canzone)
     test_lettura_segni_ripresa(es)
     test_ordine_esecuzione(es)
     test_controlli_ripresa(es)
