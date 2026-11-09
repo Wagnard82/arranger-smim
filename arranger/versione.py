@@ -10,17 +10,31 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple
 
-VERSIONE = "0.9.7"
+VERSIONE = "0.9.8"
 DATA = "novembre 2026"
 DATA_EN = "November 2026"
-PRECEDENTE = "0.9.6"
+PRECEDENTE = "0.9.7"
 
 # Marca temporale del pacchetto: serve a capire a colpo d'occhio QUALE copia
 # del progetto sta girando, quando ne esistono piu' d'una sul disco.
-COMPILATO = "2 novembre 2026 ore 09.05"
+COMPILATO = "9 novembre 2026 ore 15.00"
 
 # (titolo della sezione, [voci])
 NOVITA: List[Tuple[str, List[str]]] = [
+    ("Ritornelli, volte, D.S., D.C., Coda e Fine (nuovo)", [
+        "I segni di ripresa dell'originale restano nella partitura, nelle "
+        "stesse misure, e in tutte le parti staccate: ritornelli, prima e "
+        "seconda volta, segno, coda, D.S., D.C. e Fine. Prima il brano "
+        "veniva letto in forma lineare e i segni si perdevano.",
+        "Il MIDI di anteprima suona la forma vera, con i ritornelli e i "
+        "salti eseguiti.",
+        "Il report dice la forma riconosciuta (per esempio «si suonano le "
+        "misure 1-16, 5-15…») e segnala i segni incoerenti, come una volta "
+        "senza ritornello o un D.S. senza segno.",
+        "Nessuna nota o legatura attraversa i confini delle volte. Provato "
+        "su Für Elise, Let It Be e Never Gonna Give You Up, aperti in Dorico "
+        "e MuseScore: nessun segno doppio.",
+    ]),
     ("Archi: prima posizione intera", [
         "Violino in 1a media da Sol3 a Si5, col 4o dito sul Mi (prima si "
         "fermava al Mi a vuoto); in 2a media sale almeno fino al Si5. "
@@ -462,6 +476,14 @@ def riepilogo() -> Dict[str, int]:
 # Per l'interfaccia inglese: solo le novita' rilevanti per chi la usa da
 # fuori Italia. Lo storico completo resta in italiano qui sopra.
 NOVITA_EN: List[Tuple[str, List[str]]] = [
+    ("Repeats, endings, D.S., D.C., Coda and Fine (new)", [
+        "The original's repeat signs stay in the score, in the same bars, "
+        "and in every part: repeats, first and second endings, segno, coda, "
+        "D.S., D.C. and Fine. They used to be lost.",
+        "The preview MIDI plays the real form, with repeats and jumps.",
+        "The report gives the form it found (e.g. «bars 1-16, 5-15…» are "
+        "played) and flags inconsistent signs.",
+    ]),
     ("Strings: full first position", [
         "Violin at Grade 1 from G3 to B5, with the 4th finger on the E "
         "string (it used to stop at open E); Grade 2 reaches at least B5. "

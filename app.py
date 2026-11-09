@@ -133,7 +133,7 @@ def valore(widget, nome: str, etichetta: str, predefinito, **kw):
 # sul server e' di un'altra versione — succede caricando su GitHub solo una
 # parte dei file — l'app non deve partire con un errore incomprensibile a
 # meta' esecuzione, ma dire subito che cosa manca.
-VERSIONE_INTERFACCIA = "0.9.7"
+VERSIONE_INTERFACCIA = "0.9.8"
 if VERSIONE != VERSIONE_INTERFACCIA:
     st.error(T("file_non_allineati", ui=VERSIONE_INTERFACCIA, motore=VERSIONE))
     st.stop()

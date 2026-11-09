@@ -11,7 +11,7 @@ Dorico, MuseScore o Sibelius. Il software serve all'autore (docente di
 pianoforte) come strumento di lavoro, e in prospettiva sarà venduto ai
 singoli docenti.
 
-## Stato attuale: v0.9.7 (2 novembre 2026)
+## Stato attuale: v0.9.8 (9 novembre 2026)
 
 - **Tolto (0.9.0):** ingresso da audio (Demucs, Basic Pitch, librosa/pyin,
   beat_this, yt-dlp), da PDF/OMR e da MIDI. L'ingresso è **solo MusicXML**.
@@ -35,8 +35,11 @@ singoli docenti.
     nell'armonia corretti e segnalati, equilibrio di sonorità, staffetta
     agganciata, raddoppi per famiglia, melodia al primo leggio, controcanti
     a voci diverse, strumenti traspositori letti a suono reale,
-    personalizzazione a parole letta da un interprete a regole.
-- **Test:** 1405 verifiche, tutte superate sulla 0.9.7.
+    personalizzazione a parole letta da un interprete a regole;
+  - segni di ripresa (0.9.8): ritornelli, volte, D.S., D.C., Coda e Fine
+    restano in partitura e nelle parti, il MIDI esegue la forma, il report
+    dice l'ordine delle misure.
+- **Test:** 1700 verifiche, tutte superate sulla 0.9.8.
 - **IA spenta (decisione del 29/10/2026):** l'IA dell'app resta spenta per
   ora. Tutto deve funzionare e migliorare senza API; la personalizzazione a
   parole passa dall'interprete a regole (`interprete.py`).
@@ -199,8 +202,8 @@ Pipeline: **ingestione → analizzatore → orchestratore → vincoli → esport
 
 1. ~~Collegare `~/arranger_smim` al repository GitHub~~: fatto il
    27/10/2026, 0.9.6 pubblicata (commit `706f043`).
-2. 0.9.7 pubblicata il 2/11/2026 (commit `b6c0a07`). Da verificare su
-   Streamlit Cloud che parta e mostri «ScoreCraft Edu · v0.9.7», e che la
+2. 0.9.8 pubblicata il 9/11/2026 (solo segni di ripresa). Da verificare su
+   Streamlit Cloud che parta e mostri «ScoreCraft Edu · v0.9.8», e che la
    mail di feedback arrivi con gli allegati (ancora da provare dalla 0.9.6).
 3. ~~Test dell'arrangiatore su repertorio reale~~: fatto per la 0.9.6
    (Cinema Paradiso, Dune, Can't Help Falling in Love, Let It Be).
@@ -214,7 +217,7 @@ Pipeline: **ingestione → analizzatore → orchestratore → vincoli → esport
    un capitolo alla volta), Indicazioni nazionali del DM 176/2022.
    Scartato dall'autore: l'«economia del colore» (pause lunghe e rientri).
 6. Limiti noti, dal README:
-   - i ritornelli (`<repeat>`) non vengono srotolati;
+   - l'analisi lavora sulla forma scritta dei ritornelli (vedi README);
    - nessuna gestione esplicita delle modulazioni;
    - percussioni a pattern fissi per stile.
 7. Ingresso da PDF tramite OMR (decisione del 22/10/2026). **Requisito:**

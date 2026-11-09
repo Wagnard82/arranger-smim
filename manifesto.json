@@ -1,6 +1,6 @@
 {
  "file": {
-  "app.py": "1c51b17618ca9d75dd8a0fe0659d9ac0f774d35ad7375df990a37712238a1780",
+  "app.py": "85249d121144ef6e28ee8ba10c5abf52e9ee531f7f01290b9e3e13c09ba9f9fa",
   "arranger/__init__.py": "adc68cd4cef1fc22349f3a6f755413b19ba37c63c0b156ea2651897285444af0",
   "arranger/analizzatore.py": "20ca3a04c7bbedbc410fcecb60897f4db81fe1880d1f90685b37a4e20c7776f7",
   "arranger/anteprima.py": "17b3a6a7ef38fd98f6102bbd11f125a1d276d85ba4fa13716a2355991f5eb3ea",
@@ -20,12 +20,12 @@
   "arranger/ripetizioni.py": "570dcbdd3ed2e03953b71dd1f1d8adc232e73395c686d2fef4e5ed94460f8d47",
   "arranger/strumenti.py": "1a3f979f0334210a92d800ed56247b55f504d5e66051fcfc26794c7854e531bf",
   "arranger/testi_interfaccia.py": "c57c6fe4a54e61d64813bd072806c80342d9bf16945e9b08ba82a1e2b94e47ab",
-  "arranger/versione.py": "01203190080896b9d41bd275162a2ed2965ca21eb4d9168cb63d83e357943d6b",
+  "arranger/versione.py": "b61c32f2f84826577521334b822af6dc29767b06624c0770f9e64dbe55c8a542",
   "arranger/vincoli.py": "9d3018974937b5e2098b3316963b307a8b3ad83cbc8d54b5f696a0f075ae0dd2",
   "controllo_file.py": "abec0ac6ec121da401e9467fcadf16e3c300d76193803c1a25d78203566ba777",
   "esempi/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "esempi/genera_esempi.py": "ae7924627d40abe29e1f0b6c507cb8de49d10484464b01d0bcefd501ed9ac840",
   "requirements.txt": "869ca61ac74f9d98d4a908a8b0cfeeabf3d022e5fc88980d283bc1bb9d8862b7"
  },
- "versione": "0.9.7"
+ "versione": "0.9.8"
 }

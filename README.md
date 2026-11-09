@@ -2,7 +2,7 @@
 
 *Fino alla 0.9.5 il progetto si chiamava Arranger SMIM.*
 
-**Versione 0.9.7.** Il registro delle modifiche vive in `arranger/versione.py`
+**Versione 0.9.8.** Il registro delle modifiche vive in `arranger/versione.py`
 (`VERSIONE`, `NOVITA`) ed e' mostrato dall'interfaccia in una colonna a destra:
 chi prova una versione nuova deve sapere che cosa e' cambiato senza andarlo a
 cercare. La stessa versione finisce nel tag `<software>` del MusicXML e nel
@@ -772,8 +772,10 @@ esegui("brano_segnalato.musicxml", cfg, cartella="prova")
 
 ## Limiti noti / possibili estensioni
 
-- I ritornelli non vengono ancora "srotolati": un brano con `<repeat>` viene
-  letto in forma lineare.
+- I segni di ripresa (ritornelli, volte, D.S., D.C., Coda, Fine) restano in
+  partitura e il MIDI li esegue, ma l'analisi (frasi, levigatura) lavora
+  sulla forma scritta: fra la 1a e la 2a volta puo' valutare salti che in
+  esecuzione non ci sono.
 - Il riconoscimento accordale non modula esplicitamente: usa l'armatura
   iniziale per l'ortografia delle note (diesis o bemolle).
 - Le percussioni non intonate usano pattern fissi per stile; un `groove
